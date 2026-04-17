@@ -23,7 +23,10 @@
  * @author Intel Corporation
  **/
 #define _GNU_SOURCE
+#if defined(__arm__) || defined(__aarch64__)
+#else
 #include <immintrin.h>
+#endif
 #include <assert.h>
 #include <err.h>
 #include <arpa/inet.h>

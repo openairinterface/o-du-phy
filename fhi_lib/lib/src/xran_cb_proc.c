@@ -25,7 +25,10 @@
 
 #include <unistd.h>
 #include <stdio.h>
+#if defined(__arm__) || defined(__aarch64__)
+#else
 #include <immintrin.h>
+#endif
 #include <rte_common.h>
 #include <rte_eal.h>
 #include <rte_errno.h>

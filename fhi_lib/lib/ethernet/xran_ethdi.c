@@ -491,8 +491,11 @@ int32_t xran_ethdi_init_dpdk(char *name, char *vfio_name, struct xran_io_cfg *io
     }
     printf("\n");
 
+#if defined(__arm__) || defined(__aarch64__)
+#else
     if(rte_vect_set_max_simd_bitwidth(RTE_VECT_SIMD_512) < 0)
         rte_panic("Cannot init RTE_VECT_SIMD_512: %s\n", rte_strerror(rte_errno));
+#endif
 
     /* This will return on system_core, which is not necessarily the
      * one we're on right now. */
