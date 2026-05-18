@@ -119,6 +119,12 @@ int xran_process_prach_sym(void *arg,
         pPrachCPConfig = &(p_xran_dev_ctx->perMu[mu].PrachCPConfig);
     }
 
+    bool is_prach_frame = (frame_id % pPrachCPConfig->x) == pPrachCPConfig->y[0];
+    bool is_prach_slot = is_prach_frame && xran_is_prach_slot(p_xran_dev_ctx->xran_port_id, subframe_id, slot_id, mu);
+    if (!is_prach_slot) {
+      goto prach_counter_free_mbuf_return_size;
+    }
+
     if(/*CC_ID < XRAN_MAX_SECTOR_NR && */ Ant_ID < XRAN_MAX_ANTENNA_NR && symb_id < XRAN_NUM_OF_SYMBOL_PER_SLOT){
         uint8_t numerology = mu; //xran_get_conf_numerology(p_xran_dev_ctx);
         if (numerology > 0 && pPrachCPConfig->filterIdx == XRAN_FILTERINDEX_PRACH_012) ttt_det = (1<<numerology) - 1;
