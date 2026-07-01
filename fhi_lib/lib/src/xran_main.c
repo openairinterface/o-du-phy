@@ -1248,7 +1248,8 @@ void tx_cp_dl_cb(struct rte_timer *tim, void *arg)
     if(first_call && pDevCtx->enableCP)
     {
 #ifndef POLL_EBBU_OFFLOAD
-        tti = pTCtx[(xran_lib_ota_tti_mu[PortId][mu] & 1) ^ 1].tti_to_process;
+        tti = pTCtx[(xran_lib_ota_tti_mu[PortId][mu] & 1) ^ 1].tti_to_process + pDevCtx->perMu[mu].dlCpSlotOffset;
+        tti = (tti >= xran_fs_get_max_slot(mu)) ? (tti - xran_fs_get_max_slot(mu)) : tti;
 #else
         tti = pTCtx[(pCtx->ebbu_offload_ota_tti_cnt_mu[PortId][mu] & 1) ^ 1].tti_to_process;
 #endif
@@ -1553,7 +1554,6 @@ void rx_ul_deadline_three_fourths_cb(struct rte_timer *tim, void *arg)
     p_timer_ctx = &pDevCtx->perMu[mu].cb_timer_ctx[pDevCtx->perMu[mu].timer_get % MAX_CB_TIMER_CTX];
 
     rx_tti = p_timer_ctx->tti_to_process;
-
     rx_tti = (rx_tti + xran_fs_get_max_slot(mu) - pDevCtx->perMu[mu].deadline_slot_advance[XRAN_SLOT_3_4_CB]) % xran_fs_get_max_slot(mu);
 
     for(ccId = 0; ccId < xran_get_num_cc(pDevCtx); ccId++)
@@ -2010,7 +2010,8 @@ void tx_cp_ul_cb(struct rte_timer *tim, void *arg)
         interval    = xran_fs_get_tti_interval(mu);
         PortId      = pDevCtx->xran_port_id;
 #ifndef POLL_EBBU_OFFLOAD
-        tti         = pTCtx[(xran_lib_ota_tti_mu[PortId][mu] & 1) ^ 1].tti_to_process;
+        tti         = pTCtx[(xran_lib_ota_tti_mu[PortId][mu] & 1) ^ 1].tti_to_process + pDevCtx->perMu[mu].ulCpSlotOffset;
+        tti         = (tti >= xran_fs_get_max_slot(mu)) ? (tti - xran_fs_get_max_slot(mu)) : tti;
 #else
         tti         = pTCtx[(pCtx->ebbu_offload_ota_tti_cnt_mu[PortId][mu] & 1) ^ 1].tti_to_process;
 #endif

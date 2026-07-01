@@ -244,6 +244,7 @@ int32_t xran_timing_create_cbs(void *args)
                 max_dl_delay_offset += interval_us_local;
                 numSlots++;
             }
+            p_dev_ctx->perMu[mu].dlCpSlotOffset = numSlots;
 
             /* Delay from start of 'a' slot */
             delay_cp_dl_max = max_dl_delay_offset - p_dev_ctx->fh_cfg.perMu[mu].T1a_max_cp_dl;
@@ -281,7 +282,6 @@ int32_t xran_timing_create_cbs(void *args)
                 ul_delay_offset += interval_us_local;
                 numSlots++;
             }
-
             delay_cp_ul = ul_delay_offset - p_dev_ctx->fh_cfg.perMu[mu].T1a_max_cp_ul;
             sym_cp_ul = (delay_cp_ul*1000/(interval_us_local*1000/N_SYM_PER_SLOT)+1);
             p_dev_ctx->perMu[mu].ulCpSlotOffset = numSlots;
@@ -299,7 +299,7 @@ int32_t xran_timing_create_cbs(void *args)
             delay_up    = p_dev_ctx->fh_cfg.perMu[mu].T1a_max_up;
             time_diff_us = p_dev_ctx->fh_cfg.perMu[mu].Ta4_max;
             lower_bound_window=(p_dev_ctx->fh_cfg.perMu[mu].Ta3_min>p_dev_ctx->fh_cfg.perMu[mu].Ta4_min?p_dev_ctx->fh_cfg.perMu[mu].Ta3_min:p_dev_ctx->fh_cfg.perMu[mu].Ta4_min);
-            delay_cp2up = delay_up-delay_cp_dl_max;
+            delay_cp2up = p_dev_ctx->fh_cfg.perMu[mu].T1a_max_cp_dl - p_dev_ctx->fh_cfg.perMu[mu].T1a_max_up;
 
             time_diff_nSymb = time_diff_us*1000/(interval_us_local*1000/N_SYM_PER_SLOT);
             p_dev_ctx->perMu[mu].sym_up       = sym_up = -(delay_up*1000/(interval_us_local*1000/N_SYM_PER_SLOT));

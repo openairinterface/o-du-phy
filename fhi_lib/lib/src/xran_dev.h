@@ -281,6 +281,7 @@ typedef struct xran_device_per_mu_fields
     /* Keeps track of how many sections are processed while parsing C-plan packet */
     uint8_t sectiondb_elm[XRAN_MAX_SECTIONDB_CTX][XRAN_DIR_MAX][XRAN_COMPONENT_CARRIERS_MAX][XRAN_MAX_ANTENNA_NR * 2 + XRAN_MAX_ANT_ARRAY_ELM_NR];
 
+    uint8_t dlCpSlotOffset; /* Introduced to support large T1a/Ta4 values */
     uint8_t ulCpSlotOffset; /* Indicates the tti offset to use while sending UL Cp packets.
                                (Decided based on T1a_max_cp_ul)
                                When Current OTA is N:

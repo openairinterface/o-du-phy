@@ -127,7 +127,7 @@ extern "C" {
 #if (defined(XRAN_O_RU_BUILD) || defined(XRAN_SAMPLEAPP_BUILD))
     #define XRAN_N_FE_BUF_LEN        (20)   /**< Number of TTIs (slots) */
 #else
-    #define XRAN_N_FE_BUF_LEN        (10)    /**< Number of TTIs (slots) */
+    #define XRAN_N_FE_BUF_LEN        (20)    /**< Number of TTIs (slots) */
 #endif
 
 #define XRAN_MAX_SECTOR_NR           (40)   /**< Max sectors per XRAN port */
