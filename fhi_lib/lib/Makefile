@@ -25,10 +25,10 @@ MYCUSTOMSPACE1='------------------------------------------------------------'
 ##############################################################
 
 # Default target architecture and compiler
-TARGET ?= x86
+TARGET ?= $(shell uname -m)
 
 # Architecture and compiler-specific tools and flags
-ifeq ($(TARGET), x86)
+ifeq ($(TARGET), x86_64)
     ifeq ($(WIRELESS_SDK_TOOLCHAIN),gcc)
         CC  := gcc
         CPP := g++
@@ -50,7 +50,7 @@ ifeq ($(TARGET), x86)
     else
         $(error "Please define WIRELESS_SDK_TOOLCHAIN environment variable")
     endif
-else ifeq ($(TARGET), armv8) # aarch64
+else ifeq ($(TARGET), aarch64)
     CC := gcc
     CPP := g++
     LD := gcc
@@ -131,7 +131,7 @@ CC_SRC = $(ETH_DIR)/xran_ethdi.c \
 	$(SRC_DIR)/xran_main.c \
 	$(SRC_DIR)/xran_delay_measurement.c
 
-ifeq ($(TARGET), x86)
+ifeq ($(TARGET), x86_64)
     CPP_SRC = $(SRC_DIR)/xran_compression.cpp \
               $(SRC_DIR)/xran_bfp_ref.cpp \
               $(SRC_DIR)/xran_bfp_cplane8.cpp \
@@ -158,7 +158,7 @@ CC_FLAGS += -std=gnu11 -Wall -Wno-deprecated-declarations  \
 	-Wimplicit-function-declaration \
 	-g -O
 
-ifeq ($(TARGET), x86)
+ifeq ($(TARGET), x86_64)
 CC_FLAGS += -mavx512bw -march=skylake-avx512 -mtune=skylake-avx512
 endif
 
@@ -174,12 +174,12 @@ ifeq ($(WIRELESS_SDK_TARGET_ISA),spr)
     CC_FLAGS += -D_BBLIB_SPR_ -qopt-zmm-usage=high
 endif
 
-ifeq ($(TARGET), x86)
+ifeq ($(TARGET), x86_64)
     CPP_FLAGS := -D__STDC_LIMIT_MACROS -D__STDC_CONSTANT_MACROS -D_GNU_SOURCE -D_REENTRANT -pipe \
                  -fPIC \
                  -falign-functions=16  \
                  -Werror -Wno-unused-variable -std=c++14 -mcmodel=large -mavx512bw -march=skylake-avx512 -mtune=skylake-avx512
-else ifeq ($(TARGET), armv8)
+else ifeq ($(TARGET), aarch64)
     CPP_FLAGS := -D__STDC_LIMIT_MACROS -D__STDC_CONSTANT_MACROS -D_GNU_SOURCE -D_REENTRANT -pipe \
                  -Werror -Wno-unused-variable -std=c++14
 endif
@@ -242,10 +242,10 @@ CPP_SNC_OBJTARGETS := $(addprefix $(PROJECT_OBJ_DIR)/,$(CPP_OBJS_SNC))
 
 AS_OBJTARGETS := $(addprefix $(PROJECT_OBJ_DIR)/,$(AS_OBJS))
 #-qopt-report=5 -qopt-matmul -qopt-report-phase=all
-ifeq ($(TARGET), x86)
+ifeq ($(TARGET), x86_64)
     CPP_COMP       := -O3 -DNDEBUG  -fPIE
     CPP_COMP_SNC   := -O3 -DNDEBUG -march=icelake-server -fPIE
-else ifeq ($(TARGET), armv8)
+else ifeq ($(TARGET), aarch64)
     CPP_COMP       := -O3 -DNDEBUG -fPIE -Wrestrict
     CPP_COMP_SNC   := -O3 -DNDEBUG -march=icelake-server -fPIE -Wrestrict
 endif
