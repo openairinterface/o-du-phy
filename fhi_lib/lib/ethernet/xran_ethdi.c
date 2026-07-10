@@ -41,7 +41,9 @@
 #else
 #include <immintrin.h>
 #endif
+#if !defined(__arm__) && !defined(__aarch64__)
 #include <numa.h>
+#endif
 #include <rte_config.h>
 #include <rte_common.h>
 #include <rte_log.h>
@@ -76,6 +78,11 @@
 
 #define BURST_RX_IO_SIZE 48
 
+/* Max consecutive no-progress rte_eth_tx_burst() retries in xran_tx_from_ring()
+ * before dropping the unsent burst.  Guards against a permanent timing-thread
+ * freeze when the DPAA2 DPNI TX-copy buffer pool is momentarily exhausted. */
+#define XRAN_ETH_TX_MAX_RETRY 256
+
 //#define ORAN_OWD_DEBUG_TX_LOOP
 
 struct xran_ethdi_ctx g_ethdi_ctx = { 0 };
@@ -99,7 +106,7 @@ int32_t xran_ethdi_mbuf_send(struct rte_mbuf *mb, uint16_t ethertype, uint16_t v
     int res = 0;
 
     mb->port = ctx->io_cfg.port[vf_id];
-    xran_add_eth_hdr_vlan(&ctx->entities[vf_id][ID_O_RU], ethertype, mb);
+    xran_add_eth_hdr_vlan(&ctx->entities[vf_id][ID_O_RU], ethertype, mb, ctx->up_vlan_tag);
 
     res = xran_enqueue_mbuf(mb, ctx->tx_ring[vf_id]);
     return res;
@@ -111,7 +118,7 @@ int32_t xran_ethdi_mbuf_send_cp(struct rte_mbuf *mb, uint16_t ethertype, uint16_
     int res = 0;
 
     mb->port = ctx->io_cfg.port[vf_id];
-    xran_add_eth_hdr_vlan(&ctx->entities[vf_id][ID_O_RU], ethertype, mb);
+    xran_add_eth_hdr_vlan(&ctx->entities[vf_id][ID_O_RU], ethertype, mb, ctx->cp_vlan_tag);
 
     res = xran_enqueue_mbuf(mb, ctx->tx_ring[vf_id]);
     return res;
@@ -373,17 +380,30 @@ int32_t xran_ethdi_init_dpdk(char *name, char *vfio_name, struct xran_io_cfg *io
     char bbdev_vdev[32]   = "";
     char bbdev_vdev_aux[XRAN_MAX_AUX_BBDEV_NUM][32];
     char vfio_token[64]   = "";
-    char iova_mode[32]    = "--iova-mode=pa";
+#if defined(__arm__) || defined(__aarch64__)
+    /* DPAA2 (NXP fsl-mc bus) requires virtual-address IOVA mode */
+    char iova_mode[32] = "--iova-mode=va";
+#else
+    char iova_mode[32] = "--iova-mode=pa";
+#endif
     char socket_mem[32]   = "--socket-mem=0";
     char socket_limit[32] = "--socket-limit=0";
+#if !defined(__arm__) && !defined(__aarch64__)
     uint32_t cpu = 0;
     uint32_t node = 0;
-
     cpu = sched_getcpu();
     node = numa_node_of_cpu(cpu);
+#endif
 
+#if defined(__arm__) || defined(__aarch64__)
+    /* DPAA2 uses the fsl-mc bus; disable PCI bus scanning entirely */
+    const char *bus_probe_arg = "--no-pci";
+#else
+    /* x86: dummy allow-list entry so no unintended PCI device is bound */
+    const char *bus_probe_arg = "-a0000:00:00.0";
+#endif
     char *argv[14 + XRAN_MAX_AUX_BBDEV_NUM] = { name, core_mask, main_core, "-n2", iova_mode, socket_mem, socket_limit, "--proc-type=auto",
-        "--file-prefix", name, "-a0000:00:00.0", bbdev_wdev, bbdev_vdev, vfio_token};
+        "--file-prefix", name, (char *)bus_probe_arg, bbdev_wdev, bbdev_vdev, vfio_token};
 
     for (i = 0; i < XRAN_MAX_AUX_BBDEV_NUM; i++)
     {
@@ -430,6 +450,11 @@ int32_t xran_ethdi_init_dpdk(char *name, char *vfio_name, struct xran_io_cfg *io
     }
 
     if (io_cfg->dpdkMemorySize){
+#if defined(__arm__) || defined(__aarch64__)
+        /* NXP LX2160A has a single NUMA node; no per-socket suffix needed */
+        snprintf(socket_mem, RTE_DIM(socket_mem), "--socket-mem=%d", io_cfg->dpdkMemorySize);
+        snprintf(socket_limit, RTE_DIM(socket_limit), "--socket-limit=%d", io_cfg->dpdkMemorySize);
+#else
         printf("node %d\n", node);
         if (node == 1){
             snprintf(socket_mem, RTE_DIM(socket_mem), "--socket-mem=0,%d", io_cfg->dpdkMemorySize);
@@ -438,6 +463,7 @@ int32_t xran_ethdi_init_dpdk(char *name, char *vfio_name, struct xran_io_cfg *io
             snprintf(socket_mem, RTE_DIM(socket_mem), "--socket-mem=%d,0", io_cfg->dpdkMemorySize);
             snprintf(socket_limit, RTE_DIM(socket_limit), "--socket-limit=%d,0", io_cfg->dpdkMemorySize);
         }
+#endif
     }
 
     if (io_cfg->core < 64)
@@ -502,6 +528,14 @@ int32_t xran_ethdi_init_dpdk(char *name, char *vfio_name, struct xran_io_cfg *io
     if (rte_eal_init(RTE_DIM(argv), argv) < 0)
         rte_panic("Cannot init EAL: %s\n", rte_strerror(rte_errno));
 
+#if defined(__arm__) || defined(__aarch64__)
+    /* On DPAA2 the TX copy-path (SW ring ops pool) prints a WARN for every
+     * CP packet — ~5000/s.  Suppress the dpaa2 PMD to ERROR so the log stays
+     * readable.  "Non DPAA2 buffer pool" at WARN level is the expected
+     * behaviour; it confirms the copy path is active and pools are SW-freed. */
+    rte_log_set_level_pattern("*dpaa2*", RTE_LOG_ERR);
+#endif
+
     if (0 == io_cfg->dpdkProcessType && rte_eal_process_type() == RTE_PROC_SECONDARY)
         rte_exit(EXIT_FAILURE,
                 "Secondary process type not supported.\n");
@@ -547,7 +581,11 @@ int32_t xran_ethdi_init_dpdk_ports(struct xran_io_cfg *io_cfg,
             struct rte_dev_iterator iterator;
             uint16_t port_id;
 
-            if (rte_dev_probe(io_cfg->dpdk_dev[i]) != 0 ||
+            /* In DPDK 25.11 the FSL-MC bus probes DPAA2 devices during
+             * rte_eal_init(); a second rte_dev_probe() for the same device
+             * returns -EEXIST (non-zero) but the port IS available.  Only
+             * treat this as fatal when no eth devices were created at all. */
+            if (rte_dev_probe(io_cfg->dpdk_dev[i]) != 0 &&
                 rte_eth_dev_count_avail() == 0) {
                     errx(1, "Network port doesn't exist\n");
             }
@@ -1300,13 +1338,32 @@ static inline uint16_t xran_tx_from_ring(int port, struct rte_ring *r)
     if (!dequeued)
         return 0;   /* Nothing to send. */
 
-    while (1) {     /* When tx queue is full it is trying again till succeed */
-        sent += rte_eth_tx_burst(port, 0, &mbufs[sent], dequeued - sent);
-        if (sent == dequeued){
-            MLogXRANTask(PID_RADIO_ETH_TX_BURST, t1, MLogXRANTick());
-            return remaining;
+    /* Bound the retry loop.  On DPAA2 every TX packet that is not from the
+     * DPNI-attached pool takes the copy path (eth_copy_mbuf_to_fd), which
+     * allocates a buffer from the DPNI BMAN pool per packet.  If that pool is
+     * momentarily exhausted, rte_eth_tx_burst() returns short WITHOUT blocking,
+     * and an unbounded "retry till success" loop spins forever here: this is
+     * the single timing thread, so it is also the only context that could
+     * drain/replenish the pool -> permanent freeze of the whole xran timing
+     * pipeline.  On a PCIe NIC (x86) the ring always drains so the old loop
+     * was safe; on DPAA2 it is not.  Cap the no-progress retries, then drop
+     * the unsent mbufs (freeing them back to their SW-ring pool so they are
+     * not leaked) and let the timing loop continue. */
+    unsigned int no_progress = 0;
+    while (sent < dequeued) {
+        uint16_t n = rte_eth_tx_burst(port, 0, &mbufs[sent], dequeued - sent);
+        sent += n;
+        if (n) {
+            no_progress = 0;
+            continue;
+        }
+        if (++no_progress > XRAN_ETH_TX_MAX_RETRY) {
+            rte_pktmbuf_free_bulk(&mbufs[sent], dequeued - sent);
+            break;
         }
     }
+    MLogXRANTask(PID_RADIO_ETH_TX_BURST, t1, MLogXRANTick());
+    return remaining;
 }
 
 int32_t process_dpdk_io(void* args)

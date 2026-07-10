@@ -484,7 +484,7 @@ static inline int enqueue_cp_pkt_to_tx_sym_ring(uint8_t ruPortId, int ccId, uint
     uint32_t num_sym_T1a_max_cp_dl = XRAN_USEC_TO_NUM_SYM(interval, pDevCtx->fh_cfg.perMu[mu].T1a_max_cp_dl);
 
     mbuf->port = ctx->io_cfg.port[vfId];
-    xran_add_eth_hdr_vlan(&ctx->entities[vfId][ID_O_RU], ETHER_TYPE_ECPRI, mbuf);
+    xran_add_eth_hdr_vlan(&ctx->entities[vfId][ID_O_RU], ETHER_TYPE_ECPRI, mbuf, ctx->cp_vlan_tag);
     struct rte_ring *ring;
     int32_t symToSendOn;
 
@@ -1035,6 +1035,23 @@ int32_t xran_cp_create_and_send_section(uint8_t xranPortId, uint8_t ruPortId, in
     struct xran_device_ctx *pDevCtx   = xran_dev_get_ctx_by_id(xranPortId);
     if(pDevCtx==NULL)
         return -1;
+
+    /* NXP startup fix: drop DUPLICATE UL C-plane for the SAME target slot per eAxC.
+     * At startup the RX resync can oscillate (repeated "Cannot Push"), making the TX
+     * pipeline re-emit one UL slot's C-plane many times at varying (some out-of-window)
+     * advances; that burst poisons the RU's per-eAxC UL activation and eAxC0 stays
+     * starved for the whole run. Steady state sends each slot once (tti advances), so
+     * dropping consecutive same-tti UL C-plane is safe and removes only the storm;
+     * the first (in-window) send is kept. */
+    if (dir == XRAN_DIR_UL) {
+        static int _last_ul_tti[16];
+        static int _dedup_init = 0;
+        if (!_dedup_init) { for (int _i = 0; _i < 16; _i++) _last_ul_tti[_i] = -1; _dedup_init = 1; }
+        uint32_t _rp2 = ruPortId & 0xf;
+        if ((int)tti == _last_ul_tti[_rp2])
+            return 0;   /* duplicate C-plane for the same slot -> skip */
+        _last_ul_tti[_rp2] = (int)tti;
+    }
 
     struct xran_common_counters *pCnt = &pDevCtx->fh_counters;
     struct xran_cp_gen_params cpPktGenParams;

@@ -80,7 +80,7 @@ struct ethdi_hdr {
 void xran_init_mbuf_pool(struct xran_io_cfg *io_cfg, uint32_t mtu);
 void xran_init_port(int port, struct xran_io_cfg *io_cfg, uint32_t mtu);
 void xran_init_port_mempool(int p_id, struct xran_io_cfg *io_cfg);
-void xran_add_eth_hdr_vlan(struct rte_ether_addr *dst, uint16_t ethertype, struct rte_mbuf *mb);
+void xran_add_eth_hdr_vlan(struct rte_ether_addr *dst, uint16_t ethertype, struct rte_mbuf *mb, uint16_t vlan_tag);
 
 #define PANIC_ON(x, m, ...) do { if (unlikely(x)) \
     rte_panic("%s: " m "\n", #x, ##__VA_ARGS__); } while (0)

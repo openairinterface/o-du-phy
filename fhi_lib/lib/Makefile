@@ -51,9 +51,11 @@ ifeq ($(TARGET), x86)
         $(error "Please define WIRELESS_SDK_TOOLCHAIN environment variable")
     endif
 else ifeq ($(TARGET), armv8) # aarch64
-    CC := gcc
-    CPP := g++
-    LD := gcc
+    CROSS ?=
+    CC  := $(CROSS)gcc
+    CPP := $(CROSS)g++
+    LD  := $(CROSS)gcc
+    AR  := $(CROSS)ar
     CFLAGS += -march=armv8-a
     LDFLAGS +=
 else
@@ -100,7 +102,13 @@ ifeq ($(RTE_SDK),)
 endif
 
 RTE_TARGET ?= x86_64-native-linux-icc
-RTE_INC := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH):/usr/lib64/pkgconfig:$(RTE_SDK)/build/meson-uninstalled pkg-config --cflags-only-I libdpdk)
+ifeq ($(TARGET), armv8)
+    # For NXP LX2160A: DPDK installed via Dockerfile.dpdk to $(RTE_SDK).
+    # Try pkg-config in the install prefix first, fall back to $(RTE_SDK)/include.
+    RTE_INC := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH):$(RTE_SDK)/lib/pkgconfig:$(RTE_SDK)/lib/aarch64-linux-gnu/pkgconfig:$(RTE_SDK)/build/meson-uninstalled pkg-config --cflags-only-I libdpdk 2>/dev/null || echo "-I$(RTE_SDK)/include")
+else
+    RTE_INC := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH):/usr/lib64/pkgconfig:$(RTE_SDK)/build/meson-uninstalled pkg-config --cflags-only-I libdpdk)
+endif
 
 API_DIR := $(PROJECT_DIR)/api
 SRC_DIR := $(PROJECT_DIR)/src

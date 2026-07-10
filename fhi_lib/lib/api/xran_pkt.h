@@ -154,7 +154,7 @@ union ecpri_seq_id
     {
         uint16_t data_num_1;
     } data;
-} __rte_packed;
+} __attribute__((__packed__));
 
 #define ecpri_seq_id_bitfield_seq_id          0
 #define ecpri_seq_id_bitfield_sub_seq_id      8
@@ -182,7 +182,7 @@ union xran_ecpri_cmn_hdr
     {
         uint32_t    data_num_1;
     } data;
-} __rte_packed;
+} __attribute__((__packed__));
 
 #define xran_ecpri_cmn_hdr_bitfield_EcpriVer        4
 #define xran_ecpri_cmn_hdr_bitfield_EcpriMsgType    8
@@ -200,7 +200,7 @@ struct xran_ecpri_delay_meas_pl
     uint8_t             ActionType;           /**< Table 2-17 Octet 6     */
     TimeStamp           ts;                   /**< Table 2-17 Octet 7-16  */
     int64_t             CompensationValue;    /**< Table 2-17 Octet 17    */
-} /*__rte_packed*/;
+} /*__attribute__((__packed__))*/;
 
 /**
  ******************************************************************************
@@ -214,7 +214,7 @@ struct xran_ecpri_delay_meas_pl
  {
     union xran_ecpri_cmn_hdr cmnhdr;
     struct xran_ecpri_delay_meas_pl  deMeasPl;
- }/*__rte_packed*/;
+ }/*__attribute__((__packed__))*/;
 
 /**
  ******************************************************************************
@@ -229,7 +229,7 @@ struct xran_ecpri_hdr
     union xran_ecpri_cmn_hdr cmnhdr;
     rte_be16_t ecpri_xtc_id;            /**< 3.1.3.1.6 real time control data / IQ data transfer message series identifier */
     union ecpri_seq_id ecpri_seq_id;   /**< 3.1.3.1.7 message identifier */
-} __rte_packed;
+} __attribute__((__packed__));
 
 
 /**
@@ -292,7 +292,7 @@ struct radio_app_common_hdr
        };
    }sf_slot_sym;
 
-} __rte_packed;
+} __attribute__((__packed__));
 
 /**
  ******************************************************************************
@@ -322,7 +322,7 @@ struct compression_hdr
                                 e.g. udIQWidth = 0001b means I and Q are each 1 bit wide;
                                 e.g. udIqWidth = 1111b means I and Q are each 15 bits wide
                                 */
-} __rte_packed;
+} __attribute__((__packed__));
 
 /**
  ******************************************************************************
@@ -336,7 +336,7 @@ struct xran_pkt_comm_hdr
 {
     struct rte_ether_hdr eth_hdr; /**< Ethernet Header */
     struct xran_ecpri_hdr ecpri_hdr; /**< eCPRI Transport Header */
-} __rte_packed;
+} __attribute__((__packed__));
 
 /**
 ******************************************************************************
@@ -362,7 +362,7 @@ typedef enum xran_cfm_opcode_e {
 * IEEE 802.1Q - 21.4 Common CFM Header
 ******************************************************************************
 */
-typedef struct __rte_packed xran_cfm_common_header_s
+typedef struct __attribute__((__packed__)) xran_cfm_common_header_s
 {
     uint8_t version:5;          /* 21.4.2 - The protocol version number*/
     uint8_t md_level:3;         /* 21.4.1 - Integer identifying the Maintenance Domain Level (MD Level) of the packet */
@@ -380,7 +380,7 @@ typedef struct __rte_packed xran_cfm_common_header_s
 * Only mandatory fields i.e. upto chassis ID are supported
 ******************************************************************************
 */
-typedef struct __rte_packed xran_sender_id_tlv_s
+typedef struct __attribute__((__packed__)) xran_sender_id_tlv_s
 {
     uint8_t  type;              /* 21.5.1.1 Type field in the TLV format */
     uint16_t length;            /* 21.5.1.2 The 16 bits of the Length field indicate the size, in octets, of the Value field */
@@ -403,7 +403,7 @@ typedef struct __rte_packed xran_sender_id_tlv_s
 * IEEE 802.1Q - Table 21-20—LBM and LBR formats
 ******************************************************************************
 */
-typedef struct __rte_packed xran_lbm_header_s {
+typedef struct __attribute__((__packed__)) xran_lbm_header_s {
     xran_cfm_common_header cfm_common_header;             /* See the definition of xran_cfm_common_header for sub-field field information */
     uint32_t               loopBackTransactionIdentifier; /* 21.7.3 A MEP copies the contents of the nextLBMtransID variable to this field. */
     xran_sender_id_tlv     tlv;                           /* See the definition of xran_sender_id_tlv for sub-field field information */
@@ -417,7 +417,7 @@ typedef struct __rte_packed xran_lbm_header_s {
 * IEEE 802.1Q - Table 21-20—LBM and LBR formats
 ******************************************************************************
 */
-typedef struct __rte_packed xran_lbr_header_s {
+typedef struct __attribute__((__packed__)) xran_lbr_header_s {
     xran_cfm_common_header cfm_common_header;               /* See the definition of xran_cfm_common_header for sub-field field information */
     uint32_t               loopBackTransactionIdentifier;   /* 21.7.3 A MEP copies the contents of the nextLBMtransID variable to this field. */
     uint8_t                end_tlv;
