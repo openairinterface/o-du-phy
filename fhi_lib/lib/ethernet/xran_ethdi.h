@@ -127,6 +127,9 @@ struct xran_ethdi_ctx {
     bool lbmEnable; /* Enable IEEE 802.1Q LBM messages on the fronthaul interface */
     xran_lbm_common_info lbm_common_info;
     xran_lbm_port_info   lbm_port_info[XRAN_VF_MAX];
+
+    uint16_t cp_vlan_tag; /**< 802.1Q VLAN tag for C-plane TX (0 = no VLAN) */
+    uint16_t up_vlan_tag; /**< 802.1Q VLAN tag for U-plane TX (0 = no VLAN) */
 };
 
 enum xran_mbuf_mem_op_id {

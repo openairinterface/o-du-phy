@@ -699,7 +699,58 @@ struct rte_mempool * xran_pktmbuf_pool_create(const char *name, unsigned int n,
 	unsigned int cache_size, uint16_t priv_size, uint16_t data_room_size,
 	int socket_id)
 {
-    struct rte_mempool *buf = rte_pktmbuf_pool_create(name, n,	cache_size, priv_size, data_room_size, socket_id);
+    struct rte_mempool *buf;
+#if defined(__arm__) || defined(__aarch64__)
+    /* On NXP LX2160A DPAA2, mbufs from dpaa2-ops pools take the TX fast path
+     * which relies on hardware BMAN buffer release.  Hardware BMAN release via
+     * the DPNI only works for the single DPBP registered with the DPNI via
+     * dpni_set_pools() (the RX pool).  Mbufs from any other dpaa2 pool take
+     * the fast path with their own DPBP BPID in the FD, but the DPNI does not
+     * release those buffers back to BMAN after TX — they are permanently lost.
+     *
+     * Force SW ring ops for all pools created here.  The DPAA2 TX driver will
+     * then take the copy-path (ops_index mismatch), copy the CP/metadata data
+     * into a buffer from the DPNI-attached pool, and call rte_pktmbuf_free()
+     * on the original SW-ring mbuf so the pool is never exhausted.  Pools used
+     * for HAS_EXTBUF UP mbufs also benefit: ops_index mismatch prevents the
+     * fast path, so the driver takes the HAS_EXTBUF path (IVP=1 + SW free)
+     * instead of corrupting BMAN with an extbuf PA.
+     *
+     * Use xran_pktmbuf_pool_create_dpaa2() for the DPNI-attached RX pool only,
+     * so dpni_set_pools() can configure it and eth_copy_mbuf_to_fd() can
+     * allocate from it during the copy path. */
+    buf = rte_pktmbuf_pool_create_by_ops(name, n, cache_size, priv_size,
+        data_room_size, socket_id, "ring_mp_mc");
+    if (buf == NULL) {
+        printf("xran_pktmbuf_pool_create: ring_mp_mc unavailable, using default for %s\n", name);
+        buf = rte_pktmbuf_pool_create(name, n, cache_size, priv_size, data_room_size, socket_id);
+    }
+#else
+    buf = rte_pktmbuf_pool_create(name, n, cache_size, priv_size, data_room_size, socket_id);
+#endif
+    gpxRANAddFn(n * data_room_size, (char *)name, (void*)buf);
+    return buf;
+}
+
+struct rte_mempool * xran_pktmbuf_pool_create_dpaa2(const char *name, unsigned int n,
+	unsigned int cache_size, uint16_t priv_size, uint16_t data_room_size,
+	int socket_id)
+{
+    struct rte_mempool *buf;
+#if defined(__arm__) || defined(__aarch64__)
+    /* Create a DPBP-backed dpaa2 pool for the DPNI-attached RX pool.  This is
+     * the only pool whose DPBP is registered via dpni_set_pools(), which means
+     * (a) the DPNI replenishes it automatically from received frames, and
+     * (b) eth_copy_mbuf_to_fd() can allocate from it when sending CP frames. */
+    buf = rte_pktmbuf_pool_create_by_ops(name, n, cache_size, priv_size,
+        data_room_size, socket_id, "dpaa2");
+    if (buf == NULL) {
+        printf("xran_pktmbuf_pool_create_dpaa2: dpaa2 ops unavailable for %s, falling back\n", name);
+        buf = rte_pktmbuf_pool_create(name, n, cache_size, priv_size, data_room_size, socket_id);
+    }
+#else
+    buf = rte_pktmbuf_pool_create(name, n, cache_size, priv_size, data_room_size, socket_id);
+#endif
     gpxRANAddFn(n * data_room_size, (char *)name, (void*)buf);
     return buf;
 }

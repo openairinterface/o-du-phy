@@ -1736,7 +1736,7 @@ int send_symbol_mult_section_ex(void *handle,
             if(xran_get_syscfg_bbuoffload() == 1)
             {
                 send_mb->port = eth_ctx->io_cfg.port[vf_id];
-                xran_add_eth_hdr_vlan(&eth_ctx->entities[vf_id][ID_O_RU], ETHER_TYPE_ECPRI, send_mb);
+                xran_add_eth_hdr_vlan(&eth_ctx->entities[vf_id][ID_O_RU], ETHER_TYPE_ECPRI, send_mb, eth_ctx->up_vlan_tag);
 
                 if(likely(ring)) {
                     if(rte_ring_enqueue(ring, (struct rte_mbuf *)send_mb)) {
@@ -1862,7 +1862,7 @@ int send_symbol_ex(void *handle,
         if(xran_get_syscfg_bbuoffload() == 1)
         {
             mb->port = eth_ctx->io_cfg.port[vf_id];
-            xran_add_eth_hdr_vlan(&eth_ctx->entities[vf_id][ID_O_RU], ETHER_TYPE_ECPRI, mb);
+            xran_add_eth_hdr_vlan(&eth_ctx->entities[vf_id][ID_O_RU], ETHER_TYPE_ECPRI, mb, eth_ctx->up_vlan_tag);
 
             if(likely(ring))
             {

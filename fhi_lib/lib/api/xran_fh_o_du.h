@@ -1051,6 +1051,9 @@ struct xran_fh_config {
     uint8_t technology[XRAN_MAX_DSS_PERIODICITY];   /**< technology array represents slot is LTE(0)/NR(1) */
     xran_active_numerologies_per_tti *activeMUs;    /**< Should be set per slot to true or false indicating whether
                                                          this numerology is active in this slot */
+
+    uint16_t cp_vlan_tag; /**< 802.1Q VLAN tag for C-plane (0 = no VLAN) */
+    uint16_t up_vlan_tag; /**< 802.1Q VLAN tag for U-plane (0 = no VLAN) */
 };
 
 
@@ -1362,6 +1365,11 @@ void* xran_zmalloc(char *name, size_t buf_len, uint32_t align);
 void xran_free(void *addr);
 
 struct rte_mempool * xran_pktmbuf_pool_create(const char *name, unsigned int n,
+	unsigned int cache_size, uint16_t priv_size, uint16_t data_room_size, int socket_id);
+
+/* Like xran_pktmbuf_pool_create() but forces DPAA2 hardware (dpbp-backed) ops
+ * on aarch64.  Use only for the DPNI-attached RX pool. */
+struct rte_mempool * xran_pktmbuf_pool_create_dpaa2(const char *name, unsigned int n,
 	unsigned int cache_size, uint16_t priv_size, uint16_t data_room_size, int socket_id);
 
 /**

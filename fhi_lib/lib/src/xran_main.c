@@ -2290,6 +2290,17 @@ int32_t xran_handle_rx_pkts(struct rte_mbuf* pkt_q[], uint16_t xport_id, struct 
 
         eth_hdr = rte_pktmbuf_mtod(pkt, struct rte_ether_hdr*);
 
+        /* TX inserts the 802.1Q tag in software (xran_add_eth_hdr_vlan) and the
+         * DPAA2 RX path does not offload VLAN strip, so RU frames arrive with an
+         * inline VLAN tag: eth_hdr->ether_type is 0x8100, not eCPRI, and the
+         * packet would be silently freed below.  Strip it in software here so the
+         * eCPRI classification works (no-op on already-untagged frames). */
+        if(eth_hdr->ether_type == rte_cpu_to_be_16(RTE_ETHER_TYPE_VLAN))
+        {
+            rte_vlan_strip(pkt);
+            eth_hdr = rte_pktmbuf_mtod(pkt, struct rte_ether_hdr*);
+        }
+
         if(eth_hdr->ether_type == rte_cpu_to_be_16(ETHER_TYPE_ECPRI))
         {
             rte_pktmbuf_adj(pkt, sizeof(*eth_hdr));
@@ -4738,6 +4749,12 @@ int32_t xran_open(void *pHandle, struct xran_fh_config *pConf)
     pDevCtx->dssEnable = pConf->dssEnable;
     pDevCtx->dssPeriod = pConf->dssPeriod;
     pDevCtx->csirsEnable = pConf->csirsEnable;
+
+    /* VLAN tags are shared across all ports; last open() wins if ports disagree */
+    if (pConf->cp_vlan_tag || pConf->up_vlan_tag) {
+        eth_ctx->cp_vlan_tag = pConf->cp_vlan_tag;
+        eth_ctx->up_vlan_tag = pConf->up_vlan_tag;
+    }
 
     pDevCtx->cfged_nCC = pConf->nCC;       /* if 'open per port' implemented, need to increase this by 1 */
     //pDevCtx->cfged_CCId[];

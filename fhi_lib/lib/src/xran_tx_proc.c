@@ -275,7 +275,7 @@ int32_t xran_process_tx_sym_cp_off(void *pHandle, uint8_t ctx_id, uint32_t tti, 
                             {
                                 struct rte_mbuf *send_mb_temp = (struct rte_mbuf *)send_mb;
                                 send_mb_temp->port = eth_ctx->io_cfg.port[vf_id];
-                                xran_add_eth_hdr_vlan(&eth_ctx->entities[vf_id][ID_O_RU], ETHER_TYPE_ECPRI, send_mb_temp);
+                                xran_add_eth_hdr_vlan(&eth_ctx->entities[vf_id][ID_O_RU], ETHER_TYPE_ECPRI, send_mb_temp, eth_ctx->up_vlan_tag);
 
                                 if(likely(ring)) {
                                     if(rte_ring_enqueue(ring, (struct rte_mbuf *)send_mb)) {
@@ -400,7 +400,7 @@ int32_t xran_process_tx_sym_cp_off(void *pHandle, uint8_t ctx_id, uint32_t tti, 
                     {
                         struct rte_mbuf *send_mb_temp = (struct rte_mbuf *)send_mb;
                         send_mb_temp->port = eth_ctx->io_cfg.port[vf_id];
-                        xran_add_eth_hdr_vlan(&eth_ctx->entities[vf_id][ID_O_RU], ETHER_TYPE_ECPRI, send_mb_temp);
+                        xran_add_eth_hdr_vlan(&eth_ctx->entities[vf_id][ID_O_RU], ETHER_TYPE_ECPRI, send_mb_temp, eth_ctx->up_vlan_tag);
 
                         if(likely(ring)) {
                             if(rte_ring_enqueue(ring, (struct rte_mbuf *)send_mb)) {
@@ -1671,9 +1671,12 @@ int32_t xran_process_tx_sym_cp_on_opt(void* pHandle, uint8_t ctx_id, uint32_t tt
                         mb_oran_hdr_ext->buf_len = ext_buff_len;
                         mb_oran_hdr_ext->ol_flags |= RTE_MBUF_F_EXTERNAL;
                         mb_oran_hdr_ext->shinfo = p_share_data;
-                        mb_oran_hdr_ext->data_off = (uint16_t)RTE_MIN((uint16_t)RTE_PKTMBUF_HEADROOM, (uint16_t)mb_oran_hdr_ext->buf_len) - rte_ether_hdr_size;
-                        mb_oran_hdr_ext->data_len = (uint16_t)(mb_oran_hdr_ext->data_len + rte_ether_hdr_size);
-                        mb_oran_hdr_ext->pkt_len = mb_oran_hdr_ext->pkt_len + rte_ether_hdr_size;
+                        {
+                            uint16_t hdr_size = rte_ether_hdr_size + (eth_ctx->up_vlan_tag ? sizeof(struct rte_vlan_hdr) : 0);
+                            mb_oran_hdr_ext->data_off = (uint16_t)RTE_MIN((uint16_t)RTE_PKTMBUF_HEADROOM, (uint16_t)mb_oran_hdr_ext->buf_len) - hdr_size;
+                            mb_oran_hdr_ext->data_len = (uint16_t)(mb_oran_hdr_ext->data_len + hdr_size);
+                            mb_oran_hdr_ext->pkt_len = mb_oran_hdr_ext->pkt_len + hdr_size;
+                        }
                         mb_oran_hdr_ext->port = eth_ctx->io_cfg.port[vf_id];
 
                         /* free previously used mbuf pointed by to_free_mbuf */
@@ -1690,32 +1693,49 @@ int32_t xran_process_tx_sym_cp_on_opt(void* pHandle, uint8_t ctx_id, uint32_t tt
 
                         pStart = (char*)((char*)mb_oran_hdr_ext->buf_addr + mb_oran_hdr_ext->data_off);
 
-                        /* Fill in the ethernet header. */
+                        /* Fill in the ethernet header (with optional 802.1Q VLAN tag). */
 #ifndef TRANSMIT_BURST
+                        if (eth_ctx->up_vlan_tag) {
+                            struct rte_ether_hdr *eth_h = (struct rte_ether_hdr *)pStart;
+                            struct rte_vlan_hdr  *vh    = (struct rte_vlan_hdr *)(eth_h + 1);
 #if (RTE_VER_YEAR >= 21)
-                        rte_eth_macaddr_get(mb_oran_hdr_ext->port, &((struct rte_ether_hdr*)pStart)->src_addr);         /* set source addr */
-                        ((struct rte_ether_hdr*)pStart)->dst_addr = eth_ctx->entities[vf_id][ID_O_RU];                  /* set dst addr */
+                            rte_eth_macaddr_get(mb_oran_hdr_ext->port, &eth_h->src_addr);
+                            eth_h->dst_addr = eth_ctx->entities[vf_id][ID_O_RU];
 #else
-                        rte_eth_macaddr_get(mb_oran_hdr_ext->port, &((struct rte_ether_hdr*)pStart)->s_addr);         /* set source addr */
-                        ((struct rte_ether_hdr*)pStart)->d_addr = eth_ctx->entities[vf_id][ID_O_RU];                  /* set dst addr */
+                            rte_eth_macaddr_get(mb_oran_hdr_ext->port, &eth_h->s_addr);
+                            eth_h->d_addr = eth_ctx->entities[vf_id][ID_O_RU];
+#endif
+                            eth_h->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_VLAN);
+                            vh->vlan_tci  = rte_cpu_to_be_16(eth_ctx->up_vlan_tag);
+                            vh->eth_proto = ETHER_TYPE_ECPRI_BE;
+                        } else {
+#if (RTE_VER_YEAR >= 21)
+                            rte_eth_macaddr_get(mb_oran_hdr_ext->port, &((struct rte_ether_hdr*)pStart)->src_addr);         /* set source addr */
+                            ((struct rte_ether_hdr*)pStart)->dst_addr = eth_ctx->entities[vf_id][ID_O_RU];                  /* set dst addr */
+#else
+                            rte_eth_macaddr_get(mb_oran_hdr_ext->port, &((struct rte_ether_hdr*)pStart)->s_addr);         /* set source addr */
+                            ((struct rte_ether_hdr*)pStart)->d_addr = eth_ctx->entities[vf_id][ID_O_RU];                  /* set dst addr */
 #ifdef DEBUG
-                        struct rte_ether_hdr *h = (struct rte_ether_hdr *)rte_pktmbuf_mtod(mb_oran_hdr_ext, struct rte_ether_hdr*);
-                        struct rte_ether_addr *s = &h->s_addr;
-                        struct rte_ether_addr *dst = &((struct rte_ether_hdr*)pStart)->d_addr;
-                        printf("src=%x:%x:%x:%x:%x:%x, dst=%x:%x:%x:%x:%x:%x\n",
-                                    s->addr_bytes[0], s->addr_bytes[1], s->addr_bytes[2],
-                                    s->addr_bytes[3], s->addr_bytes[4], s->addr_bytes[5],
-                                    dst->addr_bytes[0], dst->addr_bytes[1], dst->addr_bytes[2],
-                                    dst->addr_bytes[3], dst->addr_bytes[4], dst->addr_bytes[5]);
+                            struct rte_ether_hdr *h = (struct rte_ether_hdr *)rte_pktmbuf_mtod(mb_oran_hdr_ext, struct rte_ether_hdr*);
+                            struct rte_ether_addr *s = &h->s_addr;
+                            struct rte_ether_addr *dst = &((struct rte_ether_hdr*)pStart)->d_addr;
+                            printf("src=%x:%x:%x:%x:%x:%x, dst=%x:%x:%x:%x:%x:%x\n",
+                                        s->addr_bytes[0], s->addr_bytes[1], s->addr_bytes[2],
+                                        s->addr_bytes[3], s->addr_bytes[4], s->addr_bytes[5],
+                                        dst->addr_bytes[0], dst->addr_bytes[1], dst->addr_bytes[2],
+                                        dst->addr_bytes[3], dst->addr_bytes[4], dst->addr_bytes[5]);
 #endif
 #endif
-                        ((struct rte_ether_hdr*)pStart)->ether_type = ETHER_TYPE_ECPRI_BE;                            /* ethertype */
+                            ((struct rte_ether_hdr*)pStart)->ether_type = ETHER_TYPE_ECPRI_BE;                            /* ethertype */
+                        }
 #endif
-                        nPktSize = sizeof(struct rte_ether_hdr)
-                                                + sizeof(struct xran_ecpri_hdr)
-                                                + sizeof(struct radio_app_common_hdr) ;
-
-                        ecpri_hdr = (struct xran_ecpri_hdr*)(pStart + sizeof(struct rte_ether_hdr));
+                        {
+                            uint16_t inner_hdr_off = rte_ether_hdr_size + (eth_ctx->up_vlan_tag ? (uint16_t)sizeof(struct rte_vlan_hdr) : 0);
+                            nPktSize = inner_hdr_off
+                                                    + sizeof(struct xran_ecpri_hdr)
+                                                    + sizeof(struct radio_app_common_hdr) ;
+                            ecpri_hdr = (struct xran_ecpri_hdr*)(pStart + inner_hdr_off);
+                        }
 
                         ecpri_hdr->cmnhdr.data.data_num_1 = 0x0;
                         ecpri_hdr->cmnhdr.bits.ecpri_ver = XRAN_ECPRI_VER;
@@ -1758,7 +1778,7 @@ int32_t xran_process_tx_sym_cp_on_opt(void* pHandle, uint8_t ctx_id, uint32_t tt
 
                     if(sectinfo->prbElemBegin || p_xran_dev_ctx->RunSlotPrbMapBySymbolEnable)
                     {
-                        pDst = (uint16_t*)(pStart + sizeof(struct rte_ether_hdr) + sizeof(struct xran_ecpri_hdr));
+                        pDst = (uint16_t*)((char*)ecpri_hdr + sizeof(struct xran_ecpri_hdr));
                         pxp = (struct xran_up_pkt_gen_params *)pDst;
                         /* radio app header */
                         pxp->app_params.data_feature.value = 0x10;
@@ -2062,27 +2082,46 @@ xran_process_tx_srs_cp_on(void* pHandle, uint8_t ctx_id, uint32_t tti, int32_t s
                         mb_oran_hdr_ext->buf_len = ext_buff_len;
                         mb_oran_hdr_ext->ol_flags |= RTE_MBUF_F_EXTERNAL;
                         mb_oran_hdr_ext->shinfo = p_share_data;
-                        mb_oran_hdr_ext->data_off = (uint16_t)RTE_MIN((uint16_t)RTE_PKTMBUF_HEADROOM, (uint16_t)mb_oran_hdr_ext->buf_len) - rte_ether_hdr_size;
-                        mb_oran_hdr_ext->data_len = (uint16_t)(mb_oran_hdr_ext->data_len + rte_ether_hdr_size);
-                        mb_oran_hdr_ext->pkt_len = mb_oran_hdr_ext->pkt_len + rte_ether_hdr_size;
+                        {
+                            uint16_t hdr_size2 = rte_ether_hdr_size + (eth_ctx->up_vlan_tag ? sizeof(struct rte_vlan_hdr) : 0);
+                            mb_oran_hdr_ext->data_off = (uint16_t)RTE_MIN((uint16_t)RTE_PKTMBUF_HEADROOM, (uint16_t)mb_oran_hdr_ext->buf_len) - hdr_size2;
+                            mb_oran_hdr_ext->data_len = (uint16_t)(mb_oran_hdr_ext->data_len + hdr_size2);
+                            mb_oran_hdr_ext->pkt_len = mb_oran_hdr_ext->pkt_len + hdr_size2;
+                        }
                         mb_oran_hdr_ext->port = eth_ctx->io_cfg.port[vf_id];
                         pStart = (char*)((char*)mb_oran_hdr_ext->buf_addr + mb_oran_hdr_ext->data_off);
 
-                        /* Fill in the ethernet header. */
+                        /* Fill in the ethernet header (with optional 802.1Q VLAN tag). */
+                        if (eth_ctx->up_vlan_tag) {
+                            struct rte_ether_hdr *eth_h2 = (struct rte_ether_hdr *)pStart;
+                            struct rte_vlan_hdr  *vh2    = (struct rte_vlan_hdr *)(eth_h2 + 1);
 #if (RTE_VER_YEAR >= 21)
-                        rte_eth_macaddr_get(mb_oran_hdr_ext->port, &((struct rte_ether_hdr*)pStart)->src_addr);         /* set source addr */
-                        ((struct rte_ether_hdr*)pStart)->dst_addr = eth_ctx->entities[vf_id][ID_O_RU];                  /* set dst addr */
+                            rte_eth_macaddr_get(mb_oran_hdr_ext->port, &eth_h2->src_addr);
+                            eth_h2->dst_addr = eth_ctx->entities[vf_id][ID_O_RU];
 #else
-                        rte_eth_macaddr_get(mb_oran_hdr_ext->port, &((struct rte_ether_hdr*)pStart)->s_addr);         /* set source addr */
-                        ((struct rte_ether_hdr*)pStart)->d_addr = eth_ctx->entities[vf_id][ID_O_RU];                  /* set dst addr */
+                            rte_eth_macaddr_get(mb_oran_hdr_ext->port, &eth_h2->s_addr);
+                            eth_h2->d_addr = eth_ctx->entities[vf_id][ID_O_RU];
 #endif
-                        ((struct rte_ether_hdr*)pStart)->ether_type = ETHER_TYPE_ECPRI_BE;                            /* ethertype */
-
-                        nPktSize = sizeof(struct rte_ether_hdr)
-                                                + sizeof(struct xran_ecpri_hdr)
-                                                + sizeof(struct radio_app_common_hdr) ;
-
-                        ecpri_hdr = (struct xran_ecpri_hdr*)(pStart + sizeof(struct rte_ether_hdr));
+                            eth_h2->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_VLAN);
+                            vh2->vlan_tci  = rte_cpu_to_be_16(eth_ctx->up_vlan_tag);
+                            vh2->eth_proto = ETHER_TYPE_ECPRI_BE;
+                        } else {
+#if (RTE_VER_YEAR >= 21)
+                            rte_eth_macaddr_get(mb_oran_hdr_ext->port, &((struct rte_ether_hdr*)pStart)->src_addr);         /* set source addr */
+                            ((struct rte_ether_hdr*)pStart)->dst_addr = eth_ctx->entities[vf_id][ID_O_RU];                  /* set dst addr */
+#else
+                            rte_eth_macaddr_get(mb_oran_hdr_ext->port, &((struct rte_ether_hdr*)pStart)->s_addr);         /* set source addr */
+                            ((struct rte_ether_hdr*)pStart)->d_addr = eth_ctx->entities[vf_id][ID_O_RU];                  /* set dst addr */
+#endif
+                            ((struct rte_ether_hdr*)pStart)->ether_type = ETHER_TYPE_ECPRI_BE;                            /* ethertype */
+                        }
+                        {
+                            uint16_t inner_hdr_off2 = rte_ether_hdr_size + (eth_ctx->up_vlan_tag ? (uint16_t)sizeof(struct rte_vlan_hdr) : 0);
+                            nPktSize = inner_hdr_off2
+                                                    + sizeof(struct xran_ecpri_hdr)
+                                                    + sizeof(struct radio_app_common_hdr) ;
+                            ecpri_hdr = (struct xran_ecpri_hdr*)(pStart + inner_hdr_off2);
+                        }
 
                         ecpri_hdr->cmnhdr.data.data_num_1 = 0x0;
                         ecpri_hdr->cmnhdr.bits.ecpri_ver = XRAN_ECPRI_VER;
@@ -2122,7 +2161,7 @@ xran_process_tx_srs_cp_on(void* pHandle, uint8_t ctx_id, uint32_t tti, int32_t s
 
                     if(sectinfo->prbElemBegin)
                     {
-                        pDst = (uint16_t*)(pStart + sizeof(struct rte_ether_hdr) + sizeof(struct xran_ecpri_hdr));
+                        pDst = (uint16_t*)((char*)ecpri_hdr + sizeof(struct xran_ecpri_hdr));
                         pxp = (struct xran_up_pkt_gen_params *)pDst;
                         /* radio app header */
                         pxp->app_params.data_feature.value = 0x10;
@@ -2374,27 +2413,46 @@ xran_process_tx_csirs_cp_on(void* pHandle, uint8_t ctx_id, uint32_t tti, int32_t
                         mb_oran_hdr_ext->buf_len = ext_buff_len;
                         mb_oran_hdr_ext->ol_flags |= RTE_MBUF_F_EXTERNAL;
                         mb_oran_hdr_ext->shinfo = p_share_data;
-                        mb_oran_hdr_ext->data_off = (uint16_t)RTE_MIN((uint16_t)RTE_PKTMBUF_HEADROOM, (uint16_t)mb_oran_hdr_ext->buf_len) - rte_ether_hdr_size;
-                        mb_oran_hdr_ext->data_len = (uint16_t)(mb_oran_hdr_ext->data_len + rte_ether_hdr_size);
-                        mb_oran_hdr_ext->pkt_len = mb_oran_hdr_ext->pkt_len + rte_ether_hdr_size;
+                        {
+                            uint16_t hdr_size3 = rte_ether_hdr_size + (eth_ctx->up_vlan_tag ? sizeof(struct rte_vlan_hdr) : 0);
+                            mb_oran_hdr_ext->data_off = (uint16_t)RTE_MIN((uint16_t)RTE_PKTMBUF_HEADROOM, (uint16_t)mb_oran_hdr_ext->buf_len) - hdr_size3;
+                            mb_oran_hdr_ext->data_len = (uint16_t)(mb_oran_hdr_ext->data_len + hdr_size3);
+                            mb_oran_hdr_ext->pkt_len = mb_oran_hdr_ext->pkt_len + hdr_size3;
+                        }
                         mb_oran_hdr_ext->port = eth_ctx->io_cfg.port[vf_id];
                         pStart = (char*)((char*)mb_oran_hdr_ext->buf_addr + mb_oran_hdr_ext->data_off);
 
-                        /* Fill in the ethernet header. */
+                        /* Fill in the ethernet header (with optional 802.1Q VLAN tag). */
+                        if (eth_ctx->up_vlan_tag) {
+                            struct rte_ether_hdr *eth_h3 = (struct rte_ether_hdr *)pStart;
+                            struct rte_vlan_hdr  *vh3    = (struct rte_vlan_hdr *)(eth_h3 + 1);
 #if (RTE_VER_YEAR >= 21)
-                        rte_eth_macaddr_get(mb_oran_hdr_ext->port, &((struct rte_ether_hdr*)pStart)->src_addr);         /* set source addr */
-                        ((struct rte_ether_hdr*)pStart)->dst_addr = eth_ctx->entities[vf_id][ID_O_RU];                  /* set dst addr */
+                            rte_eth_macaddr_get(mb_oran_hdr_ext->port, &eth_h3->src_addr);
+                            eth_h3->dst_addr = eth_ctx->entities[vf_id][ID_O_RU];
 #else
-                        rte_eth_macaddr_get(mb_oran_hdr_ext->port, &((struct rte_ether_hdr*)pStart)->s_addr);         /* set source addr */
-                        ((struct rte_ether_hdr*)pStart)->d_addr = eth_ctx->entities[vf_id][ID_O_RU];                  /* set dst addr */
+                            rte_eth_macaddr_get(mb_oran_hdr_ext->port, &eth_h3->s_addr);
+                            eth_h3->d_addr = eth_ctx->entities[vf_id][ID_O_RU];
 #endif
-                        ((struct rte_ether_hdr*)pStart)->ether_type = ETHER_TYPE_ECPRI_BE;                            /* ethertype */
-
-                        nPktSize = sizeof(struct rte_ether_hdr)
-                                                + sizeof(struct xran_ecpri_hdr)
-                                                + sizeof(struct radio_app_common_hdr) ;
-
-                        ecpri_hdr = (struct xran_ecpri_hdr*)(pStart + sizeof(struct rte_ether_hdr));
+                            eth_h3->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_VLAN);
+                            vh3->vlan_tci  = rte_cpu_to_be_16(eth_ctx->up_vlan_tag);
+                            vh3->eth_proto = ETHER_TYPE_ECPRI_BE;
+                        } else {
+#if (RTE_VER_YEAR >= 21)
+                            rte_eth_macaddr_get(mb_oran_hdr_ext->port, &((struct rte_ether_hdr*)pStart)->src_addr);         /* set source addr */
+                            ((struct rte_ether_hdr*)pStart)->dst_addr = eth_ctx->entities[vf_id][ID_O_RU];                  /* set dst addr */
+#else
+                            rte_eth_macaddr_get(mb_oran_hdr_ext->port, &((struct rte_ether_hdr*)pStart)->s_addr);         /* set source addr */
+                            ((struct rte_ether_hdr*)pStart)->d_addr = eth_ctx->entities[vf_id][ID_O_RU];                  /* set dst addr */
+#endif
+                            ((struct rte_ether_hdr*)pStart)->ether_type = ETHER_TYPE_ECPRI_BE;                            /* ethertype */
+                        }
+                        {
+                            uint16_t inner_hdr_off4 = rte_ether_hdr_size + (eth_ctx->up_vlan_tag ? (uint16_t)sizeof(struct rte_vlan_hdr) : 0);
+                            nPktSize = inner_hdr_off4
+                                                    + sizeof(struct xran_ecpri_hdr)
+                                                    + sizeof(struct radio_app_common_hdr) ;
+                            ecpri_hdr = (struct xran_ecpri_hdr*)(pStart + inner_hdr_off4);
+                        }
 
                         ecpri_hdr->cmnhdr.data.data_num_1 = 0x0;
                         ecpri_hdr->cmnhdr.bits.ecpri_ver = XRAN_ECPRI_VER;
@@ -2434,7 +2492,7 @@ xran_process_tx_csirs_cp_on(void* pHandle, uint8_t ctx_id, uint32_t tti, int32_t
 
                     if(sectinfo->prbElemBegin)
                     {
-                        pDst = (uint16_t*)(pStart + sizeof(struct rte_ether_hdr) + sizeof(struct xran_ecpri_hdr));
+                        pDst = (uint16_t*)((char*)ecpri_hdr + sizeof(struct xran_ecpri_hdr));
                         pxp = (struct xran_up_pkt_gen_params *)pDst;
                         /* radio app header */
                         pxp->app_params.data_feature.value = 0x10;
