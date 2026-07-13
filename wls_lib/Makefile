@@ -34,7 +34,7 @@ endif
 ifeq ($(WIRELESS_SDK_TARGET_ISA),sse)
     TARGET_PROCESSOR := -xSSE4.2
 else ifeq ($(WIRELESS_SDK_TARGET_ISA),avx2)
-    TARGET_PROCESSOR := -xCORE-AVX2
+    TARGET_PROCESSOR := -march=core-avx2
 else ifeq ($(WIRELESS_SDK_TARGET_ISA),avx512)
     TARGET_PROCESSOR := -march=skylake-avx512
 else ifeq ($(WIRELESS_SDK_TARGET_ISA),snc)
