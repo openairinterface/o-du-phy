@@ -15,6 +15,12 @@ ifeq ($(WIRELESS_SDK_TOOLCHAIN),icc)
     AS := as
     AR := ar
     LD := icc
+else ifeq ($(WIRELESS_SDK_TOOLCHAIN),gcc)
+    CC  := gcc
+    CPP := g++
+    AS := as
+    AR := ar
+    LD := gcc
 else ifeq ($(WIRELESS_SDK_TOOLCHAIN),icx)
     CC  := icx
     CPP := icx
@@ -51,14 +57,29 @@ PROJECT_DIR  := ./
 BUILDDIR := make
 PROJECT_BINARY := $(PROJECT_NAME).so
 
+PKGCONF ?= pkg-config
+LIBDPDK_VERSION=22.11.11
+
 ifeq ($(RTE_SDK),)
+ifneq ($(shell $(PKGCONF) --modversion "libdpdk >= '$(LIBDPDK_VERSION)'"),$(LIBDPDK_VERSION))
     $(error "Please define RTE_SDK environment variable")
 endif
+endif
 
-RTE_INC := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH):/usr/lib64/pkgconfig:$(RTE_SDK)/build/meson-uninstalled pkgconf --cflags-only-I libdpdk)
+ifneq ($(RTE_SDK),)
+    RTE_INC := $(shell PKG_CONFIG_PATH=/usr/lib64/pkgconfig:$(RTE_SDK)/build/meson-uninstalled pkgconf --cflags-only-I libdpdk)
+else ifeq ($(shell $(PKGCONF) --modversion "libdpdk >= '$(LIBDPDK_VERSION)'"),$(LIBDPDK_VERSION))
+    RTE_INC := $(shell PKG_CONFIG_PATH=/usr/lib64/pkgconfig  $(PKGCONF) --cflags-only-I libdpdk)
+endif
 
 CC_SRC = wls_lib_dpdk.c \
 	syslib.c
+
+CC_HDR = syslib.h \
+	ttypes.h \
+	wls.h \
+	wls_debug.h \
+	wls_lib.h
 
 CC_FLAGS += -std=gnu11 -Wall -Wno-deprecated-declarations  \
 	-fdata-sections \
@@ -164,4 +185,22 @@ release :  all
 $(PROJECT_BINARY) : $(DIRLIST) echo_start_build $(GENERATE_DEPS) $(CC_OBJTARGETS) $(AS_OBJTARGETS)
 	@echo [AR]    $(subst $(BUILDDIR)/,,$@)
 	@$(CC) $(CC_OBJTARGETS) $(AS_OBJTARGETS) -shared -fPIC -o $@
+
+##############################################################
+#  Install configuration
+##############################################################
+
+INSTALL_DIR := /usr/local
+INCLUDE_DIR := $(INSTALL_DIR)/include/
+
+.PHONY : install
+install: $(PROJECT_BINARY) install_headers
+	@echo [INSTALL] : $(PROJECT_BINARY)
+	@$(CP) $(PROJECT_BINARY) $(INSTALL_DIR)/lib
+
+.PHONY : install_headers
+install_headers: $(CC_SRC)
+	@echo [INSTALL] : $(PROJECT_NAME) headers
+	@$(MD) $(INCLUDE_DIR)
+	@$(CP) $(CC_HDR) $(INCLUDE_DIR)
 
