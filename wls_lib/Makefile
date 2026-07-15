@@ -58,17 +58,17 @@ BUILDDIR := make
 PROJECT_BINARY := $(PROJECT_NAME).so
 
 PKGCONF ?= pkg-config
-LIBDPDK_VERSION=22.11.11
+DPDK_MIN_VERSION = 22.11
 
 ifeq ($(RTE_SDK),)
-ifneq ($(shell $(PKGCONF) --modversion "libdpdk >= '$(LIBDPDK_VERSION)'"),$(LIBDPDK_VERSION))
+ifneq ($(shell $(PKGCONF) --atleast-version=$(DPDK_MIN_VERSION) libdpdk && echo yes),yes)
     $(error "Please define RTE_SDK environment variable")
 endif
 endif
 
 ifneq ($(RTE_SDK),)
     RTE_INC := $(shell PKG_CONFIG_PATH=/usr/lib64/pkgconfig:$(RTE_SDK)/build/meson-uninstalled pkgconf --cflags-only-I libdpdk)
-else ifeq ($(shell $(PKGCONF) --modversion "libdpdk >= '$(LIBDPDK_VERSION)'"),$(LIBDPDK_VERSION))
+else
     RTE_INC := $(shell PKG_CONFIG_PATH=/usr/lib64/pkgconfig  $(PKGCONF) --cflags-only-I libdpdk)
 endif
 
