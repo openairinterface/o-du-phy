@@ -1391,7 +1391,7 @@ void rx_ul_static_srs_cb(struct rte_timer *tim, void *arg)
 
     rx_tti = p_timer_ctx->tti_to_process;
 
-    rx_tti = (rx_tti + xran_fs_get_max_slot(mu) - 1 - pDevCtx->perMu[mu].deadline_slot_advance[XRAN_SLOT_HALF_CB]) % xran_fs_get_max_slot(mu);
+    rx_tti = (rx_tti + xran_fs_get_max_slot(mu) - 1 - pDevCtx->perMu[mu].deadline_slot_advance[XRAN_SLOT_STATIC_SRS_CB]) % xran_fs_get_max_slot(mu);
 
     /* U-Plane */
     for(ccId = 0; ccId < xran_get_num_cc(pDevCtx); ccId++) {

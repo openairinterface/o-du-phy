@@ -74,6 +74,7 @@ enum xran_slot_cb_type_id {
     XRAN_SLOT_HALF_CB = 1,
     XRAN_SLOT_3_4_CB  = 2,
     XRAN_SLOT_FULL_CB = 3,
+    XRAN_SLOT_STATIC_SRS_CB = 4,
     XRAN_SLOT_CB_TYPE_MAX
 };
 

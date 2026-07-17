@@ -450,6 +450,7 @@ int32_t xran_timing_create_cbs(void *args)
             if (0 == p_dev_ctx->enableSrsCp)
             {
                 uint16_t nSrsDealySym = p_dev_ctx->nSrsDelaySym;
+                p_dev_ctx->perMu[mu].deadline_slot_advance[XRAN_SLOT_STATIC_SRS_CB] = (time_diff_nSymb + nSrsDealySym) / N_SYM_PER_SLOT;
                 printf("Start U-plane static SRS %d us OTA        [offset  in sym %d]\n", time_diff_us, time_diff_nSymb + nSrsDealySym);
                 cb_elm = xran_create_cb(xran_timer_arm_for_deadline, rx_ul_static_srs_cb, (void*)p_dev_ctx);
                 if(cb_elm)
