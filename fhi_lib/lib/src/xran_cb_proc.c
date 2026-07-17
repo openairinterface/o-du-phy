@@ -203,7 +203,7 @@ int32_t xran_timing_create_cbs(void *args)
     uint32_t delay_cp_ul;
     uint32_t delay_up;
     uint32_t time_diff_us;
-    uint32_t delay_cp2up;
+    int32_t  delay_cp2up;
     uint32_t sym_cp_dl_max, sym_cp_dl_min;
     uint32_t sym_cp_ul;
     uint32_t time_diff_nSymb;
@@ -213,7 +213,8 @@ int32_t xran_timing_create_cbs(void *args)
     struct xran_device_ctx *p_dev_ctx =  (struct xran_device_ctx *)args;
     struct cb_elem_entry * cb_elm = NULL;
     uint32_t interval_us_local, ul_delay_offset;
-    uint8_t ru_id, mu, numSlots, max_dl_offset_sym, min_dl_offset_sym, ul_offset_sym;
+    uint32_t numSlots, max_dl_offset_sym, min_dl_offset_sym, ul_offset_sym;
+    uint8_t ru_id, mu;
     /* ToS = Top of Second start +- 1.5us */
     struct timespec ts;
     char buff[100];
@@ -299,12 +300,20 @@ int32_t xran_timing_create_cbs(void *args)
             delay_up    = p_dev_ctx->fh_cfg.perMu[mu].T1a_max_up;
             time_diff_us = p_dev_ctx->fh_cfg.perMu[mu].Ta4_max;
             lower_bound_window=(p_dev_ctx->fh_cfg.perMu[mu].Ta3_min>p_dev_ctx->fh_cfg.perMu[mu].Ta4_min?p_dev_ctx->fh_cfg.perMu[mu].Ta3_min:p_dev_ctx->fh_cfg.perMu[mu].Ta4_min);
-            delay_cp2up = p_dev_ctx->fh_cfg.perMu[mu].T1a_max_cp_dl - p_dev_ctx->fh_cfg.perMu[mu].T1a_max_up;
+            delay_cp2up = (int32_t)p_dev_ctx->fh_cfg.perMu[mu].T1a_max_cp_dl - (int32_t)p_dev_ctx->fh_cfg.perMu[mu].T1a_max_up;
 
             time_diff_nSymb = time_diff_us*1000/(interval_us_local*1000/N_SYM_PER_SLOT);
             p_dev_ctx->perMu[mu].sym_up       = sym_up = -(delay_up*1000/(interval_us_local*1000/N_SYM_PER_SLOT));
             p_dev_ctx->perMu[mu].sym_up_ul_ub    = time_diff_nSymb = (time_diff_us*1000/(interval_us_local*1000/N_SYM_PER_SLOT)+1);
             p_dev_ctx->perMu[mu].sym_up_ul_lb = (lower_bound_window*1000/(interval_us_local*1000/N_SYM_PER_SLOT)+1);
+
+            /* Whole slots spanned by the U-plane windows (cf. dlCpSlotOffset /
+             * ulCpSlotOffset for the C-plane). The TX/RX paths keep consuming the
+             * un-wrapped symbol counts stored above; these mirror the C-plane
+             * offsets for validation and logging. Validate before narrowing into
+             * the uint8_t perMu fields so oversized configs cannot wrap past the cap. */
+            uint32_t dlUpSlotOffset = ((uint32_t)(-sym_up) + N_SYM_PER_SLOT - 1) / N_SYM_PER_SLOT;
+            uint32_t ulUpDeadlineSlotOffset = time_diff_nSymb / N_SYM_PER_SLOT;
 
 #ifdef POLL_EBBU_OFFLOAD
             delay_up_min    = p_dev_ctx->fh_cfg.perMu[mu].T1a_min_up;
@@ -319,8 +328,44 @@ int32_t xran_timing_create_cbs(void *args)
             printf("RU%d mu%u, Start C-plane UL %d us after TTI  [trigger on sym %d]\n", ru_id, mu, delay_cp_ul, sym_cp_ul);
             printf("RU%d mu%u, Start U-plane DL %d us before OTA [offset  in sym %d]\n", ru_id, mu, delay_up, sym_up);
             printf("RU%d mu%u, Start U-plane UL %d us OTA        [offset  in sym %d]\n", ru_id, mu, time_diff_us, time_diff_nSymb);
+            printf("RU%d mu%u, U-plane DL window spans %u slot(s) before OTA, UL deadline %u slot(s) after OTA\n",
+                    ru_id, mu, dlUpSlotOffset, ulUpDeadlineSlotOffset);
             printf("RU%d mu%u, C-plane to U-plane delay %d us after TTI\n", ru_id, mu, delay_cp2up);
             printf("Start Sym timer %ld ns\n", TX_TIMER_INTERVAL/N_SYM_PER_SLOT);
+
+            if(dlUpSlotOffset > XRAN_MAX_UP_WINDOW_SLOTS ||
+               ulUpDeadlineSlotOffset > XRAN_MAX_UP_WINDOW_SLOTS)
+            {
+                print_err("RU%d mu%u: T1a_max_up %u us / Ta4_max %u us span %u/%u slots, max supported is %u\n",
+                        ru_id, mu, delay_up, time_diff_us,
+                        dlUpSlotOffset, ulUpDeadlineSlotOffset,
+                        XRAN_MAX_UP_WINDOW_SLOTS);
+                goto err0;
+            }
+            p_dev_ctx->perMu[mu].dlUpSlotOffset = dlUpSlotOffset;
+            p_dev_ctx->perMu[mu].ulUpDeadlineSlotOffset = ulUpDeadlineSlotOffset;
+
+            if(p_dev_ctx->enableCP)
+            {
+                /* U-plane TX for slot N reads the section-DB entries written when its
+                 * DL C-plane was sent: the C-plane must go out first, and the entry
+                 * (tti % XRAN_MAX_SECTIONDB_CTX) is overwritten when the C-plane of
+                 * slot N+XRAN_MAX_SECTIONDB_CTX is built. */
+                if(p_dev_ctx->fh_cfg.perMu[mu].T1a_max_up > p_dev_ctx->fh_cfg.perMu[mu].T1a_max_cp_dl)
+                {
+                    print_err("RU%d mu%u: T1a_max_up %u us exceeds T1a_max_cp_dl %u us - DL C-plane must precede U-plane\n",
+                            ru_id, mu, p_dev_ctx->fh_cfg.perMu[mu].T1a_max_up, p_dev_ctx->fh_cfg.perMu[mu].T1a_max_cp_dl);
+                    goto err0;
+                }
+                if((uint32_t)(p_dev_ctx->fh_cfg.perMu[mu].T1a_max_cp_dl - p_dev_ctx->fh_cfg.perMu[mu].T1a_min_up) >=
+                        (uint32_t)XRAN_MAX_SECTIONDB_CTX * interval_us_local)
+                {
+                    print_err("RU%d mu%u: T1a_max_cp_dl %u us to T1a_min_up %u us spread exceeds the section-DB depth (%u slots)\n",
+                            ru_id, mu, p_dev_ctx->fh_cfg.perMu[mu].T1a_max_cp_dl, p_dev_ctx->fh_cfg.perMu[mu].T1a_min_up,
+                            XRAN_MAX_SECTIONDB_CTX);
+                    goto err0;
+                }
+            }
 
             if(0 == p_dev_ctx->dlCpProcBurst && p_dev_ctx->DynamicSectionEna == 0)
             {
@@ -328,6 +373,11 @@ int32_t xran_timing_create_cbs(void *args)
                     p_dev_ctx->numSymsForDlCP = max_dl_offset_sym - min_dl_offset_sym + 1;
                 else
                     p_dev_ctx->numSymsForDlCP = 1;
+
+                /* the burst is spread over the 14-entry symbol wheel; more than one
+                 * slot of spread would insert duplicate callbacks on the same symbol */
+                if(p_dev_ctx->numSymsForDlCP > N_SYM_PER_SLOT)
+                    p_dev_ctx->numSymsForDlCP = N_SYM_PER_SLOT;
             }
             else
                 p_dev_ctx->numSymsForDlCP = N_SYM_PER_SLOT;

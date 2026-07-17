@@ -727,13 +727,19 @@ xran_status_t xran_check_cp_dl_sym_to_send(uint32_t cp_dl_tti, uint32_t cp_dl_sy
 {
     uint32_t cp_dl_tti_wrap = cp_dl_tti;
     uint32_t interval = xran_fs_get_tti_interval(mu);
+    uint32_t num_sym_t1a = XRAN_USEC_TO_NUM_SYM(interval, T1a_max_cp_dl);
 
-    if(cp_dl_tti == 0)
+    /* When the send instant lies before the start of the OTA-counter period that
+     * contains cp_dl_tti, compare against the equivalent instant one period later
+     * (same condition as the enqueue in enqueue_cp_pkt_to_tx_sym_ring). Testing
+     * only cp_dl_tti == 0 gave one slot of headroom, so a T1a_max_cp_dl spanning
+     * more than one slot never matched for the early ttis of each period. */
+    if(cp_dl_tti * N_SYM_PER_SLOT + cp_dl_sym < num_sym_t1a)
     {
-        cp_dl_tti_wrap = xran_fs_get_max_slot(mu);
+        cp_dl_tti_wrap = cp_dl_tti + xran_fs_get_max_slot(mu);
     }
 
-    if(xran_lib_ota_sym_idx_mu[mu] + XRAN_USEC_TO_NUM_SYM(interval, T1a_max_cp_dl) == (cp_dl_tti_wrap*N_SYM_PER_SLOT + cp_dl_sym))
+    if(xran_lib_ota_sym_idx_mu[mu] + num_sym_t1a == (cp_dl_tti_wrap*N_SYM_PER_SLOT + cp_dl_sym))
     {
         return XRAN_STATUS_SUCCESS;
     }

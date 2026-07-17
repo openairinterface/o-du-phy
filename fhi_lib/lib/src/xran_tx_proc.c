@@ -940,7 +940,7 @@ xran_prepare_up_dl_sym(uint16_t xran_port_id, uint32_t nSlotIdx,  uint32_t nCcSt
     uint8_t     portId      = 0;
     uint32_t    idxSym;
     uint8_t     ctx_id;
-    enum xran_in_period inPeriod;
+    enum xran_in_period inPeriod, inPeriodRing;
     uint32_t interval;
 
     struct xran_device_ctx * p_xran_dev_ctx = NULL;
@@ -974,16 +974,10 @@ xran_prepare_up_dl_sym(uint16_t xran_port_id, uint32_t nSlotIdx,  uint32_t nCcSt
         if(((1 << idxSym) & nSymMask) ) {
             sym_idx_to_send = xranTti*XRAN_NUM_OF_SYMBOL_PER_SLOT + idxSym;
 
-            /* We are assuming that we will send in the n-1 slot wrt ota here */
-            if((sym_idx_to_send + p_xran_dev_ctx->perMu[mu].sym_up) < 0)
-            {
-                // sym_idx_for_ring = XRAN_NUM_OF_SYMBOL_PER_SLOT*SLOTNUM_PER_SUBFRAME(interval)*1000 + p_xran_dev_ctx->perMu[mu].sym_up;
-                sym_idx_for_ring = XRAN_NUM_OF_SYMBOL_PER_SLOT*SLOTNUM_PER_SUBFRAME(interval)*1000 + idxSym + p_xran_dev_ctx->perMu[mu].sym_up;
-            }
-            else
-            {
-                sym_idx_for_ring = sym_idx_to_send + p_xran_dev_ctx->perMu[mu].sym_up;
-            }
+            /* Send |sym_up| symbols before OTA of the symbol; wraps into the previous
+             * second when the advance reaches back across it, for any number of slots */
+            sym_idx_for_ring = XranOffsetSym(-p_xran_dev_ctx->perMu[mu].sym_up, sym_idx_to_send,
+                                    XRAN_NUM_OF_SYMBOL_PER_SLOT*SLOTNUM_PER_SUBFRAME(interval)*1000, &inPeriodRing);
 
             sym_idx_to_send = XranOffsetSym(0, sym_idx_to_send, XRAN_NUM_OF_SYMBOL_PER_SLOT*SLOTNUM_PER_SUBFRAME(interval)*1000, &inPeriod);
 
