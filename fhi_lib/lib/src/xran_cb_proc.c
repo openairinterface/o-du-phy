@@ -692,7 +692,9 @@ xran_reg_sym_cb_tx_win_end(struct xran_device_ctx * p_dev_ctx, xran_callback_sym
         printf("time duration %d rounded up to duration of %d symbols\n", time_diff_us, time_diff_nSymb);
     }
     printf("U-plane DL advance is %d [us] measured against OTA time [offset in symbols is %d]\n", time_diff_us, -time_diff_nSymb);
-    absolute_ota_sym =  ((symb + XRAN_NUM_OF_SYMBOL_PER_SLOT) - time_diff_nSymb) % XRAN_NUM_OF_SYMBOL_PER_SLOT;
+    /* round the advance up to whole slots before subtracting so offsets spanning
+     * more than one slot cannot underflow the unsigned arithmetic */
+    absolute_ota_sym =  ((symb + ((time_diff_nSymb / XRAN_NUM_OF_SYMBOL_PER_SLOT) + 1) * XRAN_NUM_OF_SYMBOL_PER_SLOT) - time_diff_nSymb) % XRAN_NUM_OF_SYMBOL_PER_SLOT;
     printf("requested symb %d pkt tx time [deadline] corresponds to symb %d OTA time\n", symb, absolute_ota_sym);
 
     p_loc_sym_cb_ctx->symb_num_req  = symb;
@@ -738,8 +740,10 @@ xran_reg_sym_cb_tx_win_begin(struct xran_device_ctx * p_dev_ctx, xran_callback_s
         printf("time duration %d rounded up to duration of %d symbols\n", time_diff_us, time_diff_nSymb);
     }
     printf("U-plane DL advance is %d [us] measured against OTA time [offset in symbols is %d]\n", time_diff_us, -time_diff_nSymb);
+    /* round the advance up to whole slots before subtracting so offsets spanning
+     * more than one slot cannot underflow the unsigned arithmetic */
+    absolute_ota_sym =  ((symb + ((time_diff_nSymb / XRAN_NUM_OF_SYMBOL_PER_SLOT) + 1) * XRAN_NUM_OF_SYMBOL_PER_SLOT) - time_diff_nSymb) % XRAN_NUM_OF_SYMBOL_PER_SLOT;
     printf("requested symb %d pkt tx time [deadline] corresponds to symb %d OTA time\n", symb, absolute_ota_sym);
-    absolute_ota_sym =  ((symb + XRAN_NUM_OF_SYMBOL_PER_SLOT) - time_diff_nSymb) % XRAN_NUM_OF_SYMBOL_PER_SLOT;
 
     p_loc_sym_cb_ctx->symb_num_req  = symb;
     p_loc_sym_cb_ctx->sym_diff      = time_diff_nSymb;
