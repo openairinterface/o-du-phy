@@ -381,11 +381,13 @@ int32_t xran_timing_create_cbs(void *args)
                 }
             }
 
-            /* Full slot UL OTA + time_diff_us */
-            if(time_diff_nSymb > N_SYM_PER_SLOT)
-            {
-                p_dev_ctx->perMu[mu].deadline_slot_advance[XRAN_SLOT_FULL_CB] = (time_diff_nSymb) / N_SYM_PER_SLOT;
-            }
+            /* Full slot UL OTA + time_diff_us.
+             * The callback is registered on the wheel symbol (offset % 14); the whole
+             * slots the offset spans (offset / 14) must be carried in
+             * deadline_slot_advance so the callback reports the right tti. The
+             * division must be unconditional: an offset of exactly one slot wraps the
+             * wheel symbol to 0 of the next slot and still needs advance = 1. */
+            p_dev_ctx->perMu[mu].deadline_slot_advance[XRAN_SLOT_FULL_CB] = (time_diff_nSymb) / N_SYM_PER_SLOT;
             print_dbg("Full slot UL %d [%d]\n", p_dev_ctx->perMu[mu].deadline_slot_advance[XRAN_SLOT_FULL_CB], time_diff_nSymb);
             cb_elm = xran_create_cb(xran_timer_arm_for_deadline, rx_ul_deadline_full_cb, (void*)p_dev_ctx);
             if(cb_elm)
@@ -400,10 +402,7 @@ int32_t xran_timing_create_cbs(void *args)
             }
 
             /* 1/4 UL OTA + time_diff_us*/
-            if(time_diff_nSymb + 1*(N_SYM_PER_SLOT/4) > N_SYM_PER_SLOT)
-            {
-                p_dev_ctx->perMu[mu].deadline_slot_advance[XRAN_SLOT_1_4_CB] = (time_diff_nSymb + 1*(N_SYM_PER_SLOT/4)) / N_SYM_PER_SLOT;
-            }
+            p_dev_ctx->perMu[mu].deadline_slot_advance[XRAN_SLOT_1_4_CB] = (time_diff_nSymb + 1*(N_SYM_PER_SLOT/4)) / N_SYM_PER_SLOT;
             print_dbg("1/4 UL OTA  %d [%d]\n", p_dev_ctx->perMu[mu].deadline_slot_advance[XRAN_SLOT_1_4_CB], time_diff_nSymb);
             cb_elm = xran_create_cb(xran_timer_arm_for_deadline, rx_ul_deadline_one_fourths_cb, (void*)p_dev_ctx);
             if(cb_elm)
@@ -418,10 +417,7 @@ int32_t xran_timing_create_cbs(void *args)
             }
 
             /* Half slot UL OTA + time_diff_us*/
-            if(time_diff_nSymb + N_SYM_PER_SLOT/2 > N_SYM_PER_SLOT)
-            {
-                p_dev_ctx->perMu[mu].deadline_slot_advance[XRAN_SLOT_HALF_CB] = (time_diff_nSymb + N_SYM_PER_SLOT/2) / N_SYM_PER_SLOT;
-            }
+            p_dev_ctx->perMu[mu].deadline_slot_advance[XRAN_SLOT_HALF_CB] = (time_diff_nSymb + N_SYM_PER_SLOT/2) / N_SYM_PER_SLOT;
             print_dbg("Half slot UL   %d [%d]\n", p_dev_ctx->perMu[mu].deadline_slot_advance[XRAN_SLOT_HALF_CB], time_diff_nSymb);
             cb_elm = xran_create_cb(xran_timer_arm_for_deadline, rx_ul_deadline_half_cb, (void*)p_dev_ctx);
             if(cb_elm)
@@ -436,10 +432,7 @@ int32_t xran_timing_create_cbs(void *args)
             }
 
             /* 3/4 UL OTA + time_diff_us*/
-            if(time_diff_nSymb + 4*(N_SYM_PER_SLOT/4))
-            {
-                p_dev_ctx->perMu[mu].deadline_slot_advance[XRAN_SLOT_3_4_CB] = (time_diff_nSymb + 4*(N_SYM_PER_SLOT/4)) / N_SYM_PER_SLOT;
-            }
+            p_dev_ctx->perMu[mu].deadline_slot_advance[XRAN_SLOT_3_4_CB] = (time_diff_nSymb + 4*(N_SYM_PER_SLOT/4)) / N_SYM_PER_SLOT;
             print_dbg("3/4 UL   %d [%d]\n", p_dev_ctx->perMu[mu].deadline_slot_advance[XRAN_SLOT_3_4_CB], time_diff_nSymb);
             cb_elm = xran_create_cb(xran_timer_arm_for_deadline, rx_ul_deadline_three_fourths_cb, (void*)p_dev_ctx);
             if(cb_elm)
