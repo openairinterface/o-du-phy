@@ -2616,7 +2616,7 @@ int32_t xran_process_tx_sym_oru(void *arg, uint8_t mu)
     mlogVar[mlogVarCnt++] = 0xAAAAAAAA;
     mlogVar[mlogVarCnt++] = xran_lib_ota_sym_idx_mu[mu];
     mlogVar[mlogVarCnt++] = sym_idx;
-    mlogVar[mlogVarCnt++] = abs(p_xran_dev_ctx->sym_up);
+    mlogVar[mlogVarCnt++] = abs(p_xran_dev_ctx->perMu[mu].sym_up);
     mlogVar[mlogVarCnt++] = tti;
     mlogVar[mlogVarCnt++] = frame_id;
     mlogVar[mlogVarCnt++] = subframe_id;
@@ -3088,7 +3088,7 @@ int32_t xran_process_tx_sym(void *arg, uint8_t mu)
     mlogVar[mlogVarCnt++] = pCtx->ebbu_offload_ota_sym_cnt_mu[mu];
 #endif
     mlogVar[mlogVarCnt++] = sym_idx;
-    mlogVar[mlogVarCnt++] = abs(p_xran_dev_ctx->sym_up);
+    mlogVar[mlogVarCnt++] = abs(p_xran_dev_ctx->perMu[mu].sym_up);
     mlogVar[mlogVarCnt++] = tti;
     mlogVar[mlogVarCnt++] = frame_id;
     mlogVar[mlogVarCnt++] = subframe_id;

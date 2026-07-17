@@ -221,7 +221,8 @@ int32_t xran_validate_sectionId(void *arg, uint16_t mu)
 }
 
 extern uint32_t xran_lib_ota_sym_idx_mu[];
-static inline int xran_rx_timing_window_check(struct xran_device_ctx* p_dev_ctx, int tti, uint8_t symId, uint8_t mu, 
+extern uint32_t xran_lib_ota_tti_mu[XRAN_PORTS_NUM][XRAN_MAX_NUM_MU];
+static inline int xran_rx_timing_window_check(struct xran_device_ctx* p_dev_ctx, int tti, uint8_t symId, uint8_t mu,
 uint32_t pktFrameId, uint32_t pktSfId, uint32_t pktSlotId)
 {
 /* oran spec allows only 8-bit frameId. Hence max value of frameId that we can receive in a packet is 256.
@@ -511,8 +512,9 @@ int process_mbuf_batch(struct rte_mbuf* pkt_q[], void* handle, int16_t num, stru
 #if XRAN_MLOG_VAR
             if(radio_hdr[i] != NULL && data_hdr[i] != NULL)
             {
+                mlogVarCnt = 0;
                 mlogVar[mlogVarCnt++] = 0xBBBBBBBB;
-                mlogVar[mlogVarCnt++] = xran_lib_ota_tti_mu[PortId][mu];
+                mlogVar[mlogVarCnt++] = xran_lib_ota_tti_mu[xran_port][mu[i]];
                 mlogVar[mlogVarCnt++] = radio_hdr[i]->frame_id;
                 mlogVar[mlogVarCnt++] = radio_hdr[i]->sf_slot_sym.subframe_id;
                 mlogVar[mlogVarCnt++] = radio_hdr[i]->sf_slot_sym.slot_id;
@@ -557,7 +559,7 @@ int process_mbuf_batch(struct rte_mbuf* pkt_q[], void* handle, int16_t num, stru
             if (radio_hdr[i] != NULL && data_hdr[i] != NULL)
             {
                 mlogVar[mlogVarCnt++] = 0xBBBBBBBB;
-                mlogVar[mlogVarCnt++] = xran_lib_ota_tti_mu[PortId][mu];
+                mlogVar[mlogVarCnt++] = xran_lib_ota_tti_mu[xran_port][mu[i]];
                 mlogVar[mlogVarCnt++] = radio_hdr[i]->frame_id;
                 mlogVar[mlogVarCnt++] = radio_hdr[i]->sf_slot_sym.subframe_id;
                 mlogVar[mlogVarCnt++] = radio_hdr[i]->sf_slot_sym.slot_id;
