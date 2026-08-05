@@ -171,8 +171,13 @@ void xran_init_port(int p_id, struct xran_io_cfg *io_cfg, uint32_t mtu)
 #endif
             };
     struct rte_eth_txmode txmode = {
+#if (RTE_VER_YEAR >= 21)
             .mq_mode        = RTE_ETH_MQ_TX_NONE,
             .offloads       = RTE_ETH_TX_OFFLOAD_MULTI_SEGS
+#else
+            .mq_mode        = ETH_MQ_TX_NONE,
+            .offloads       = DEV_TX_OFFLOAD_MULTI_SEGS
+#endif
             };
     struct rte_eth_conf port_conf = {
             .rxmode = rxmode,
@@ -205,11 +210,21 @@ void xran_init_port(int p_id, struct xran_io_cfg *io_cfg, uint32_t mtu)
         drv_name = dev_info.driver_name;
     printf("initializing port %d for TX, drv=%s\n", p_id, drv_name);
 
-    if (dev_info.tx_offload_capa & RTE_ETH_TX_OFFLOAD_MBUF_FAST_FREE){
-        printf("set DEV_TX_OFFLOAD_MBUF_FAST_FREE\n");
+#if (RTE_VER_YEAR >= 21)
+    if (dev_info.tx_offload_capa & RTE_ETH_TX_OFFLOAD_MBUF_FAST_FREE)
+    {
+        printf("set RTE_ETH_TX_OFFLOAD_MBUF_FAST_FREE\n");
         port_conf.txmode.offloads |=
             RTE_ETH_TX_OFFLOAD_MBUF_FAST_FREE;
     }
+#else
+    if (dev_info.tx_offload_capa & DEV_TX_OFFLOAD_MBUF_FAST_FREE)
+    {
+        printf("set DEV_TX_OFFLOAD_MBUF_FAST_FREE\n");
+        port_conf.txmode.offloads |=
+            DEV_TX_OFFLOAD_MBUF_FAST_FREE;
+    }
+#endif
 
     rte_eth_macaddr_get(p_id, &addr);
 

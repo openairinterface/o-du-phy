@@ -202,14 +202,25 @@ static void check_port_link_status(uint8_t portid)
                 printf("Port %d Link Up - speed %u "
                         "Mbps - %s\n", (uint8_t)portid,
                         (unsigned)link.link_speed,
+#if (RTE_VER_YEAR >= 21)
                         (link.link_duplex == RTE_ETH_LINK_FULL_DUPLEX) ?
-                        ("full-duplex") : ("half-duplex\n"));
+                        ("full-duplex") : ("half-duplex\n")
+#else
+                        (link.link_duplex == ETH_LINK_FULL_DUPLEX) ?
+                        ("full-duplex") : ("half-duplex\n")
+#endif
+                      );
             else
                 printf("Port %d Link Down\n",
                         (uint8_t)portid);
         }
 
-        if (link.link_status == RTE_ETH_LINK_DOWN) {
+#if (RTE_VER_YEAR >= 21)
+        if (link.link_status == RTE_ETH_LINK_DOWN)
+#else
+        if (link.link_status == ETH_LINK_DOWN)
+#endif
+        {
             printf(".");
             fflush(stdout);
             rte_delay_ms(CHECK_INTERVAL);
