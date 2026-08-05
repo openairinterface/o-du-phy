@@ -78,6 +78,11 @@
 
 #define BURST_RX_IO_SIZE 48
 
+/* Max consecutive no-progress rte_eth_tx_burst() retries in xran_tx_from_ring()
+ * before dropping the unsent burst.  Guards against a permanent timing-thread
+ * freeze when the DPAA2 DPNI TX-copy buffer pool is momentarily exhausted. */
+#define XRAN_ETH_TX_MAX_RETRY 256
+
 //#define ORAN_OWD_DEBUG_TX_LOOP
 
 struct xran_ethdi_ctx g_ethdi_ctx = { 0 };
@@ -1344,13 +1349,32 @@ static inline uint16_t xran_tx_from_ring(int port, struct rte_ring *r)
     if (!dequeued)
         return 0;   /* Nothing to send. */
 
-    while (1) {     /* When tx queue is full it is trying again till succeed */
-        sent += rte_eth_tx_burst(port, 0, &mbufs[sent], dequeued - sent);
-        if (sent == dequeued){
-            MLogXRANTask(PID_RADIO_ETH_TX_BURST, t1, MLogXRANTick());
-            return remaining;
+    /* Bound the retry loop.  On DPAA2 every TX packet that is not from the
+     * DPNI-attached pool takes the copy path (eth_copy_mbuf_to_fd), which
+     * allocates a buffer from the DPNI BMAN pool per packet.  If that pool is
+     * momentarily exhausted, rte_eth_tx_burst() returns short WITHOUT blocking,
+     * and an unbounded "retry till success" loop spins forever here: this is
+     * the single timing thread, so it is also the only context that could
+     * drain/replenish the pool -> permanent freeze of the whole xran timing
+     * pipeline.  On a PCIe NIC (x86) the ring always drains so the old loop
+     * was safe; on DPAA2 it is not.  Cap the no-progress retries, then drop
+     * the unsent mbufs (freeing them back to their SW-ring pool so they are
+     * not leaked) and let the timing loop continue. */
+    unsigned int no_progress = 0;
+    while (sent < dequeued) {
+        uint16_t n = rte_eth_tx_burst(port, 0, &mbufs[sent], dequeued - sent);
+        sent += n;
+        if (n) {
+            no_progress = 0;
+            continue;
+        }
+        if (++no_progress > XRAN_ETH_TX_MAX_RETRY) {
+            rte_pktmbuf_free_bulk(&mbufs[sent], dequeued - sent);
+            break;
         }
     }
+    MLogXRANTask(PID_RADIO_ETH_TX_BURST, t1, MLogXRANTick());
+    return remaining;
 }
 
 int32_t process_dpdk_io(void* args)
