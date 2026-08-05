@@ -484,7 +484,7 @@ static inline int enqueue_cp_pkt_to_tx_sym_ring(uint8_t ruPortId, int ccId, uint
     uint32_t num_sym_T1a_max_cp_dl = XRAN_USEC_TO_NUM_SYM(interval, pDevCtx->fh_cfg.perMu[mu].T1a_max_cp_dl);
 
     mbuf->port = ctx->io_cfg.port[vfId];
-    xran_add_eth_hdr_vlan(&ctx->entities[vfId][ID_O_RU], ETHER_TYPE_ECPRI, mbuf);
+    xran_add_eth_hdr_vlan(&ctx->entities[vfId][ID_O_RU], ETHER_TYPE_ECPRI, mbuf, ctx->cp_vlan_tag);
     struct rte_ring *ring;
     int32_t symToSendOn;
 

@@ -106,7 +106,7 @@ int32_t xran_ethdi_mbuf_send(struct rte_mbuf *mb, uint16_t ethertype, uint16_t v
     int res = 0;
 
     mb->port = ctx->io_cfg.port[vf_id];
-    xran_add_eth_hdr_vlan(&ctx->entities[vf_id][ID_O_RU], ethertype, mb);
+    xran_add_eth_hdr_vlan(&ctx->entities[vf_id][ID_O_RU], ethertype, mb, ctx->up_vlan_tag);
 
     res = xran_enqueue_mbuf(mb, ctx->tx_ring[vf_id]);
     return res;
@@ -118,7 +118,7 @@ int32_t xran_ethdi_mbuf_send_cp(struct rte_mbuf *mb, uint16_t ethertype, uint16_
     int res = 0;
 
     mb->port = ctx->io_cfg.port[vf_id];
-    xran_add_eth_hdr_vlan(&ctx->entities[vf_id][ID_O_RU], ethertype, mb);
+    xran_add_eth_hdr_vlan(&ctx->entities[vf_id][ID_O_RU], ethertype, mb, ctx->cp_vlan_tag);
 
     res = xran_enqueue_mbuf(mb, ctx->tx_ring[vf_id]);
     return res;

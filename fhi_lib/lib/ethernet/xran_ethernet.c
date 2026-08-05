@@ -324,51 +324,43 @@ void xran_init_port_mempool(int p_id, struct xran_io_cfg *io_cfg)
         rte_panic("Cannot create mbuf pool: %s\n", rte_strerror(rte_errno));
 }
 
-/* Prepend ethernet header, possibly vlan tag. */
-void xran_add_eth_hdr_vlan(struct rte_ether_addr *dst, uint16_t ethertype, struct rte_mbuf *mb)
+/* Prepend ethernet header with optional 802.1Q VLAN tag.
+ * Caller must have already called rte_pktmbuf_prepend(mb, sizeof(rte_ether_hdr)).
+ * When vlan_tag != 0 this function prepends 4 more bytes and writes a
+ * full 802.1Q header: [dst][src][0x8100][TCI][inner-ethertype][payload].
+ */
+void xran_add_eth_hdr_vlan(struct rte_ether_addr *dst, uint16_t ethertype, struct rte_mbuf *mb, uint16_t vlan_tag)
 {
+    struct rte_ether_hdr *h;
 
-    /* add in the ethernet header */
-    struct rte_ether_hdr *h = (struct rte_ether_hdr *)rte_pktmbuf_mtod(mb, struct rte_ether_hdr*);
-
-    PANIC_ON(h == NULL, "mbuf prepend of ether_hdr failed");
-
-    /* Fill in the ethernet header. */
+    if (vlan_tag) {
+        /* Extend headroom by 4 bytes for the VLAN tag fields */
+        void *extra = rte_pktmbuf_prepend(mb, sizeof(struct rte_vlan_hdr));
+        PANIC_ON(extra == NULL, "mbuf prepend of vlan_hdr failed");
+        h = rte_pktmbuf_mtod(mb, struct rte_ether_hdr *);
 #if (RTE_VER_YEAR >= 21)
-    rte_eth_macaddr_get(mb->port, &h->src_addr);          /* set source addr */
-    h->dst_addr = *dst;                                   /* set dst addr */
+        rte_eth_macaddr_get(mb->port, &h->src_addr);
+        h->dst_addr = *dst;
 #else
-    rte_eth_macaddr_get(mb->port, &h->s_addr);          /* set source addr */
-    h->d_addr = *dst;                                   /* set dst addr */
+        rte_eth_macaddr_get(mb->port, &h->s_addr);
+        h->d_addr = *dst;
 #endif
-    h->ether_type = rte_cpu_to_be_16(ethertype);        /* ethertype too */
-#if 0
-    struct rte_ether_addr *s = &h->src_addr;
-    printf("src=%x:%x:%x:%x:%x:%x, dst=%x:%x:%x:%x:%x:%x\n", s->addr_bytes[0],
-            s->addr_bytes[1],
-            s->addr_bytes[2],
-            s->addr_bytes[3],
-            s->addr_bytes[4],
-            s->addr_bytes[5],
-            dst->addr_bytes[0],
-            dst->addr_bytes[1],
-            dst->addr_bytes[2],
-            dst->addr_bytes[3],
-            dst->addr_bytes[4],
-            dst->addr_bytes[5]
-    );
+        h->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_VLAN);
+        struct rte_vlan_hdr *vh = (struct rte_vlan_hdr *)(h + 1);
+        vh->vlan_tci  = rte_cpu_to_be_16(vlan_tag);
+        vh->eth_proto = rte_cpu_to_be_16(ethertype);
+    } else {
+        h = rte_pktmbuf_mtod(mb, struct rte_ether_hdr *);
+        PANIC_ON(h == NULL, "mbuf prepend of ether_hdr failed");
+#if (RTE_VER_YEAR >= 21)
+        rte_eth_macaddr_get(mb->port, &h->src_addr);
+        h->dst_addr = *dst;
+#else
+        rte_eth_macaddr_get(mb->port, &h->s_addr);
+        h->d_addr = *dst;
 #endif
-#if defined(DPDKIO_DEBUG) && DPDKIO_DEBUG > 1
-    {
-        char dst[RTE_ETHER_ADDR_FMT_SIZE] = "(empty)";
-        char src[RTE_ETHER_ADDR_FMT_SIZE] = "(empty)";
-
-        printf("*** packet for TX below (len %d) ***", rte_pktmbuf_pkt_len(mb));
-        rte_ether_format_addr(src, sizeof(src), &h->s_addr);
-        rte_ether_format_addr(dst, sizeof(dst), &h->d_addr);
-        printf("src: %s dst: %s ethertype: %.4X", src, dst, ethertype);
+        h->ether_type = rte_cpu_to_be_16(ethertype);
     }
-#endif
 }
 
 
