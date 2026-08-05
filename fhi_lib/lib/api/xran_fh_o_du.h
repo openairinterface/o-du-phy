@@ -1364,6 +1364,11 @@ void xran_free(void *addr);
 struct rte_mempool * xran_pktmbuf_pool_create(const char *name, unsigned int n,
 	unsigned int cache_size, uint16_t priv_size, uint16_t data_room_size, int socket_id);
 
+/* Like xran_pktmbuf_pool_create() but forces DPAA2 hardware (dpbp-backed) ops
+ * on aarch64.  Use only for the DPNI-attached RX pool. */
+struct rte_mempool * xran_pktmbuf_pool_create_dpaa2(const char *name, unsigned int n,
+	unsigned int cache_size, uint16_t priv_size, uint16_t data_room_size, int socket_id);
+
 /**
  * @ingroup xran
  *

@@ -259,7 +259,7 @@ void xran_init_port(int p_id, struct xran_io_cfg *io_cfg, uint32_t mtu)
         {
             snprintf(rx_pool_name, RTE_DIM(rx_pool_name), "%s_p_%d_q_%d", "mp_rx_", p_id, qi);
             printf("[%d] %s num blocks %d\n", p_id, rx_pool_name, num_mbufs);
-            _eth_mbuf_pool_vf_rx[p_id][qi] = xran_pktmbuf_pool_create(rx_pool_name, num_mbufs,
+            _eth_mbuf_pool_vf_rx[p_id][qi] = xran_pktmbuf_pool_create_dpaa2(rx_pool_name, num_mbufs,
                         MBUF_CACHE, 0, data_room_size, rte_socket_id());
         }
         else
