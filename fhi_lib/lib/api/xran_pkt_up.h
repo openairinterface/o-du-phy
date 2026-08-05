@@ -75,7 +75,7 @@ struct data_section_hdr {
             uint32_t     sect_id:12;    /**< 5.4.5.1 section identifier */
         };
     }fields;
-} __rte_packed;
+} __attribute__((__packed__));
 
 
 /*
@@ -119,7 +119,7 @@ union compression_params {
         uint8_t compShift:4;
         uint8_t compBitWidth:4;
         } uLaw;
-} __rte_packed;
+} __attribute__((__packed__));
 
 
 /*
@@ -136,7 +136,7 @@ struct rb_map
 {
     int16_t i_sample:IQ_BITS; /**< This parameter is the In-phase sample value */
     int16_t q_sample:IQ_BITS; /**< This parameter is the Quadrature sample value */
-} __rte_packed;
+} __attribute__((__packed__));
 
 /**
  ******************************************************************************
@@ -151,7 +151,7 @@ struct xran_up_pkt_hdr
     struct xran_ecpri_hdr ecpri_hdr; /**< eCPRI Transport Header */
     struct radio_app_common_hdr app_hdr; /**< eCPRI Transport Header */
     struct data_section_hdr data_sec_hdr;
-} __rte_packed;
+} __attribute__((__packed__));
 
 /**
  ******************************************************************************
@@ -167,7 +167,7 @@ struct xran_up_pkt_hdr_comp
     struct radio_app_common_hdr app_hdr; /**< eCPRI Transport Header */
     struct data_section_hdr data_sec_hdr; /**< data section Header */
     struct data_section_compression_hdr data_comp_hdr; /** Compression Header */
-} __rte_packed;
+} __attribute__((__packed__));
 
 /**
  ******************************************************************************
@@ -181,13 +181,13 @@ struct eth_xran_up_pkt_hdr
 {
     struct rte_ether_hdr eth_hdr;
     struct xran_up_pkt_hdr xran_hdr;
-}__rte_packed;
+}__attribute__((__packed__));
 
 struct eth_xran_up_pkt_hdr_comp
 {
     struct rte_ether_hdr eth_hdr;
     struct xran_up_pkt_hdr_comp xran_hdr;
-}__rte_packed;
+}__attribute__((__packed__));
 
 
 #ifdef __cplusplus
