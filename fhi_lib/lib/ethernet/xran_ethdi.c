@@ -41,7 +41,9 @@
 #else
 #include <immintrin.h>
 #endif
+#if !defined(__arm__) && !defined(__aarch64__)
 #include <numa.h>
+#endif
 #include <rte_config.h>
 #include <rte_common.h>
 #include <rte_log.h>
@@ -384,17 +386,30 @@ int32_t xran_ethdi_init_dpdk(char *name, char *vfio_name, struct xran_io_cfg *io
     char bbdev_vdev[32]   = "";
     char bbdev_vdev_aux[XRAN_MAX_AUX_BBDEV_NUM][32];
     char vfio_token[64]   = "";
-    char iova_mode[32]    = "--iova-mode=pa";
+#if defined(__arm__) || defined(__aarch64__)
+    /* DPAA2 (NXP fsl-mc bus) requires virtual-address IOVA mode */
+    char iova_mode[32] = "--iova-mode=va";
+#else
+    char iova_mode[32] = "--iova-mode=pa";
+#endif
     char socket_mem[32]   = "--socket-mem=0";
     char socket_limit[32] = "--socket-limit=0";
+#if !defined(__arm__) && !defined(__aarch64__)
     uint32_t cpu = 0;
     uint32_t node = 0;
-
     cpu = sched_getcpu();
     node = numa_node_of_cpu(cpu);
+#endif
 
+#if defined(__arm__) || defined(__aarch64__)
+    /* DPAA2 uses the fsl-mc bus; disable PCI bus scanning entirely */
+    const char *bus_probe_arg = "--no-pci";
+#else
+    /* x86: dummy allow-list entry so no unintended PCI device is bound */
+    const char *bus_probe_arg = "-a0000:00:00.0";
+#endif
     char *argv[14 + XRAN_MAX_AUX_BBDEV_NUM] = { name, core_mask, main_core, "-n2", iova_mode, socket_mem, socket_limit, "--proc-type=auto",
-        "--file-prefix", name, "-a0000:00:00.0", bbdev_wdev, bbdev_vdev, vfio_token};
+        "--file-prefix", name, (char *)bus_probe_arg, bbdev_wdev, bbdev_vdev, vfio_token};
 
     for (i = 0; i < XRAN_MAX_AUX_BBDEV_NUM; i++)
     {
@@ -441,6 +456,11 @@ int32_t xran_ethdi_init_dpdk(char *name, char *vfio_name, struct xran_io_cfg *io
     }
 
     if (io_cfg->dpdkMemorySize){
+#if defined(__arm__) || defined(__aarch64__)
+        /* NXP LX2160A has a single NUMA node; no per-socket suffix needed */
+        snprintf(socket_mem, RTE_DIM(socket_mem), "--socket-mem=%d", io_cfg->dpdkMemorySize);
+        snprintf(socket_limit, RTE_DIM(socket_limit), "--socket-limit=%d", io_cfg->dpdkMemorySize);
+#else
         printf("node %d\n", node);
         if (node == 1){
             snprintf(socket_mem, RTE_DIM(socket_mem), "--socket-mem=0,%d", io_cfg->dpdkMemorySize);
@@ -449,6 +469,7 @@ int32_t xran_ethdi_init_dpdk(char *name, char *vfio_name, struct xran_io_cfg *io
             snprintf(socket_mem, RTE_DIM(socket_mem), "--socket-mem=%d,0", io_cfg->dpdkMemorySize);
             snprintf(socket_limit, RTE_DIM(socket_limit), "--socket-limit=%d,0", io_cfg->dpdkMemorySize);
         }
+#endif
     }
 
     if (io_cfg->core < 64)
@@ -513,6 +534,14 @@ int32_t xran_ethdi_init_dpdk(char *name, char *vfio_name, struct xran_io_cfg *io
     if (rte_eal_init(RTE_DIM(argv), argv) < 0)
         rte_panic("Cannot init EAL: %s\n", rte_strerror(rte_errno));
 
+#if defined(__arm__) || defined(__aarch64__)
+    /* On DPAA2 the TX copy-path (SW ring ops pool) prints a WARN for every
+     * CP packet — ~5000/s.  Suppress the dpaa2 PMD to ERROR so the log stays
+     * readable.  "Non DPAA2 buffer pool" at WARN level is the expected
+     * behaviour; it confirms the copy path is active and pools are SW-freed. */
+    rte_log_set_level_pattern("*dpaa2*", RTE_LOG_ERR);
+#endif
+
     if (0 == io_cfg->dpdkProcessType && rte_eal_process_type() == RTE_PROC_SECONDARY)
         rte_exit(EXIT_FAILURE,
                 "Secondary process type not supported.\n");
@@ -558,7 +587,11 @@ int32_t xran_ethdi_init_dpdk_ports(struct xran_io_cfg *io_cfg,
             struct rte_dev_iterator iterator;
             uint16_t port_id;
 
-            if (rte_dev_probe(io_cfg->dpdk_dev[i]) != 0 ||
+            /* In DPDK 25.11 the FSL-MC bus probes DPAA2 devices during
+             * rte_eal_init(); a second rte_dev_probe() for the same device
+             * returns -EEXIST (non-zero) but the port IS available.  Only
+             * treat this as fatal when no eth devices were created at all. */
+            if (rte_dev_probe(io_cfg->dpdk_dev[i]) != 0 &&
                 rte_eth_dev_count_avail() == 0) {
                     errx(1, "Network port doesn't exist\n");
             }
