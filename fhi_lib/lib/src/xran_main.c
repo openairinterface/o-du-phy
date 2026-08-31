@@ -5594,6 +5594,8 @@ int32_t xran_init_PrbMap_by_symbol_from_cfg(struct xran_prb_map* p_PrbMapIn, str
 
     for(; i < XRAN_NUM_OF_SYMBOL_PER_SLOT; i++)
     {
+        if((prbMapTemp[i].nRBSize == 0))
+          break;
         /* force using a separate section for each symbol in one multisection CP (both DL and UL) message;
          * when generating DL UP, symbol index should be within nStartSymb and (nStartSymb + numSymb);
          * nPrbElm doesn't have any affect on UL UP */
