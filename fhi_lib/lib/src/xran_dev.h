@@ -74,8 +74,15 @@ enum xran_slot_cb_type_id {
     XRAN_SLOT_HALF_CB = 1,
     XRAN_SLOT_3_4_CB  = 2,
     XRAN_SLOT_FULL_CB = 3,
+    XRAN_SLOT_STATIC_SRS_CB = 4,
     XRAN_SLOT_CB_TYPE_MAX
 };
+
+/* Maximum number of whole slots an O-DU U-plane timing window (T1a_max_up or
+ * Ta4_max) may span. Bounded by the section-DB depth (XRAN_MAX_SECTIONDB_CTX,
+ * indexed tti % 4) and the buffer ring depth (XRAN_N_FE_BUF_LEN, indexed
+ * tti % 20) which also has to absorb the C-plane advance and L1 processing. */
+#define XRAN_MAX_UP_WINDOW_SLOTS    (3)
 
 struct xran_timer_ctx {
     uint32_t    tti_to_process;
@@ -287,6 +294,12 @@ typedef struct xran_device_per_mu_fields
                                When Current OTA is N:
                                For N+1 tti: ulCpSlotOffset=0
                                For N+2 tti: ulCpSlotOffset=1  */
+    uint8_t dlUpSlotOffset; /* Whole slots the DL U-plane TX window (T1a_max_up) spans
+                               before OTA (ceil). The TX/RX paths keep consuming the
+                               un-wrapped sym_up/sym_up_ul_* counts; this mirrors
+                               dlCpSlotOffset for validation and logging. */
+    uint8_t ulUpDeadlineSlotOffset; /* Whole slots the UL U-plane RX deadline (Ta4_max)
+                               spans after OTA (floor of sym_up_ul_ub) */
     uint8_t adv_tx_factor;   /*Symbol division factor by which transmission of pkt to be done early */
 
     uint8_t deadline_slot_advance[XRAN_SLOT_CB_TYPE_MAX];   /* if CB for deadline should be in next slot but reflect current slot */

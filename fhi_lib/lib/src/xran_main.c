@@ -1391,7 +1391,7 @@ void rx_ul_static_srs_cb(struct rte_timer *tim, void *arg)
 
     rx_tti = p_timer_ctx->tti_to_process;
 
-    rx_tti = (rx_tti + xran_fs_get_max_slot(mu) - 1 - pDevCtx->perMu[mu].deadline_slot_advance[XRAN_SLOT_HALF_CB]) % xran_fs_get_max_slot(mu);
+    rx_tti = (rx_tti + xran_fs_get_max_slot(mu) - 1 - pDevCtx->perMu[mu].deadline_slot_advance[XRAN_SLOT_STATIC_SRS_CB]) % xran_fs_get_max_slot(mu);
 
     /* U-Plane */
     for(ccId = 0; ccId < xran_get_num_cc(pDevCtx); ccId++) {
@@ -1711,9 +1711,15 @@ void rx_ul_user_sym_cb(struct rte_timer *tim, void *arg)
 
     rx_tti = p_timer_ctx->tti_to_process;
 
+    int32_t secondWrap = 0; /* -1: event lies in the previous second, +1: in the next */
+
     if( p_sym_cb_ctx->sym_diff > 0)
+    {
         /* + advacne TX Wind: at OTA Time we indicating event in future */
+        if((p_timer_ctx->ota_sym_idx + p_sym_cb_ctx->sym_diff) >= xran_timingsource_get_max_ota_sym_idx(mu))
+            secondWrap = 1;
         ota_sym_idx = ((p_timer_ctx->ota_sym_idx + p_sym_cb_ctx->sym_diff) % xran_timingsource_get_max_ota_sym_idx(mu));
+    }
     else if (p_sym_cb_ctx->sym_diff < 0)
     {
         /* - dealy RX Win: at OTA Time we indicate event in the past */
@@ -1724,6 +1730,7 @@ void rx_ul_user_sym_cb(struct rte_timer *tim, void *arg)
         else
         {
             ota_sym_idx = ((xran_timingsource_get_max_ota_sym_idx(mu) + p_timer_ctx->ota_sym_idx) + p_sym_cb_ctx->sym_diff) % xran_timingsource_get_max_ota_sym_idx(mu);
+            secondWrap = -1;
         }
     }
     else /* 0 - OTA exact time */
@@ -1734,13 +1741,29 @@ void rx_ul_user_sym_cb(struct rte_timer *tim, void *arg)
     if(p_sym_cb_ctx->symCbTimeInfo)
     {
             struct xran_sense_of_time *p_sense_time = p_sym_cb_ctx->symCbTimeInfo;
+            /* rx_tti is folded into the second the event belongs to; when the
+             * sym_diff shift crossed the per-second OTA counter reset, the frame
+             * and second anchors snapshotted at arm time belong to the wrong
+             * second and must be moved with it */
+            uint16_t sfn_at_sec_start   = p_timer_ctx->xran_sfn_at_sec_start;
+            uint64_t event_second       = p_timer_ctx->current_second;
+            if(secondWrap > 0)
+            {
+                sfn_at_sec_start = (sfn_at_sec_start + NUM_OF_FRAMES_PER_SECOND) & 0x3FF;
+                event_second += 1;
+            }
+            else if(secondWrap < 0)
+            {
+                sfn_at_sec_start = (sfn_at_sec_start + NUM_OF_FRAMES_PER_SFN_PERIOD - NUM_OF_FRAMES_PER_SECOND) & 0x3FF;
+                event_second -= 1;
+            }
             p_sense_time->type_of_event = p_sym_cb_ctx->cb_type_id;
             p_sense_time->nSymIdx       = p_sym_cb_ctx->symb_num_req;
             p_sense_time->tti_counter   = rx_tti;
             p_sense_time->nSlotIdx      = (uint32_t)XranGetSlotNum(rx_tti, SLOTNUM_PER_SUBFRAME(interval));
             p_sense_time->nSubframeIdx  = (uint32_t)XranGetSubFrameNum(rx_tti,SLOTNUM_PER_SUBFRAME(interval),  SUBFRAMES_PER_SYSTEMFRAME);
-            p_sense_time->nFrameIdx     = (uint32_t)XranGetFrameNum(rx_tti, p_timer_ctx->xran_sfn_at_sec_start, SUBFRAMES_PER_SYSTEMFRAME, SLOTNUM_PER_SUBFRAME(interval));
-            p_sense_time->nSecond       = p_timer_ctx->current_second;
+            p_sense_time->nFrameIdx     = (uint32_t)XranGetFrameNum(rx_tti, sfn_at_sec_start, SUBFRAMES_PER_SYSTEMFRAME, SLOTNUM_PER_SUBFRAME(interval));
+            p_sense_time->nSecond       = event_second;
     }
 
     /* user call backs if any */
@@ -5722,6 +5745,8 @@ void xran_print_error_stats(struct xran_common_counters* x_counters){
 void xran_l1budget_calc(uint8_t numerology, uint16_t t1a_max_up, uint16_t ta4_max, uint16_t *ul_budget,uint16_t *dl_budget, uint16_t *num_sym)
 {
    uint8_t num_sym_ul,num_sym_dl, num_of_tti = 1;
+   uint8_t num_of_tti_ul, num_of_tti_dl;
+   float ul_budget_f, dl_budget_f;
    float slot_time;
    float symbol_time;
 
@@ -5732,8 +5757,19 @@ void xran_l1budget_calc(uint8_t numerology, uint16_t t1a_max_up, uint16_t ta4_ma
    //Assuming 2 tti for L1 processing for mu 1 & 3
    if (numerology > 0)
        num_of_tti = 2;
-   *ul_budget = (num_of_tti*slot_time) - (num_sym_ul*symbol_time);
-   *dl_budget = (num_of_tti*slot_time) - (num_sym_dl*symbol_time);
+   /* windows spanning more slots than the assumed pipeline consume whole
+    * budget TTIs; deepen the pipeline per direction and clamp at zero so the
+    * uint16 result cannot wrap */
+   num_of_tti_ul = num_of_tti;
+   num_of_tti_dl = num_of_tti;
+   if (num_sym_ul > num_of_tti * N_SYM_PER_SLOT)
+       num_of_tti_ul = (num_sym_ul + N_SYM_PER_SLOT - 1) / N_SYM_PER_SLOT;
+   if (num_sym_dl > num_of_tti * N_SYM_PER_SLOT)
+       num_of_tti_dl = (num_sym_dl + N_SYM_PER_SLOT - 1) / N_SYM_PER_SLOT;
+   ul_budget_f = (num_of_tti_ul*slot_time) - (num_sym_ul*symbol_time);
+   dl_budget_f = (num_of_tti_dl*slot_time) - (num_sym_dl*symbol_time);
+   *ul_budget = (ul_budget_f > 0) ? (uint16_t)ul_budget_f : 0;
+   *dl_budget = (dl_budget_f > 0) ? (uint16_t)dl_budget_f : 0;
    *num_sym = num_sym_ul;
 
    printf("dl_budget: %d\n",*dl_budget);

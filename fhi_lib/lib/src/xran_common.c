@@ -221,7 +221,8 @@ int32_t xran_validate_sectionId(void *arg, uint16_t mu)
 }
 
 extern uint32_t xran_lib_ota_sym_idx_mu[];
-static inline int xran_rx_timing_window_check(struct xran_device_ctx* p_dev_ctx, int tti, uint8_t symId, uint8_t mu, 
+extern uint32_t xran_lib_ota_tti_mu[XRAN_PORTS_NUM][XRAN_MAX_NUM_MU];
+static inline int xran_rx_timing_window_check(struct xran_device_ctx* p_dev_ctx, int tti, uint8_t symId, uint8_t mu,
 uint32_t pktFrameId, uint32_t pktSfId, uint32_t pktSlotId)
 {
 /* oran spec allows only 8-bit frameId. Hence max value of frameId that we can receive in a packet is 256.
@@ -251,30 +252,36 @@ uint32_t pktFrameId, uint32_t pktSfId, uint32_t pktSlotId)
 
     if (xran_get_syscfg_appmode() == O_DU)
     {
-        if ((0 == otaTti) && (tti != 0))
-        { // When received packet is of last tti of a sec
-            otaSymIdx = MAX_SYM_IDX_FROM_PACKET(interval) + otaSymId;
-        }
-        symIdxDeadlineMax = tti * XRAN_NUM_OF_SYMBOL_PER_SLOT + symId + p_dev_ctx->perMu[mu].sym_up_ul_ub;
-        symIdxDeadlineMin = tti * XRAN_NUM_OF_SYMBOL_PER_SLOT + symId + p_dev_ctx->perMu[mu].sym_up_ul_lb;
-        if (symIdxDeadlineMax < otaSymIdx)
+        /* Packet tti and OTA tti both live in the 256-frame ambit of the packet
+         * header's 8-bit frameId. Classify on the signed circular distance from the
+         * packet's symbol to OTA, folded into (-ambit/2, ambit/2], so windows spanning
+         * any number of slots survive the counter wrap in either direction (the
+         * previous single-slot promotion mislabelled on-time packets as early for
+         * otaTti in [1, sym_up_ul_ub/14] after every ambit rollover). */
+        int elapsedSym = otaSymIdx - (tti * XRAN_NUM_OF_SYMBOL_PER_SLOT + symId);
+        if (elapsedSym > MAX_SYM_IDX_FROM_PACKET(interval) / 2)
+            elapsedSym -= MAX_SYM_IDX_FROM_PACKET(interval);
+        else if (elapsedSym < -(MAX_SYM_IDX_FROM_PACKET(interval) / 2))
+            elapsedSym += MAX_SYM_IDX_FROM_PACKET(interval);
+
+        if (elapsedSym > p_dev_ctx->perMu[mu].sym_up_ul_ub)
         {
             print_dbg("symUpUlUb=%d, {pktFId=%u, otaFId=%u}, {pktSfId=%u, otaSfId=%u}, \t {pktSlId=%u, otaSlId=%u}, {pktSym=%u, otaSym=%u}, {pktTti=%u, otaTti=%u},otaSymId = %d, xran_lib_ota_sym_idx_mu[mu] = %d\n",
                    p_dev_ctx->perMu[mu].sym_up_ul_ub, pktFrameId, otaFrameId, pktSfId, otaSfId,
                    pktSlotId, otaSlotId, symId, xran_lib_ota_sym_idx_mu[mu] % XRAN_NUM_OF_SYMBOL_PER_SLOT,
                    tti, otaTti,otaSymId, xran_lib_ota_sym_idx_mu[mu]);
-            print_dbg("otaSymIdx=%d, symIdxDeadlineMax=%d, ttiPkt=%u, symPkt=%u, otaTti=%u",
-                otaSymIdx, symIdxDeadlineMax, tti, symId, otaTti);
+            print_dbg("otaSymIdx=%d, elapsedSym=%d, ttiPkt=%u, symPkt=%u, otaTti=%u",
+                otaSymIdx, elapsedSym, tti, symId, otaTti);
             ++p_dev_ctx->fh_counters.Rx_late;
             return -1;
         }
-        else if(otaSymIdx < symIdxDeadlineMin){
+        else if(elapsedSym < p_dev_ctx->perMu[mu].sym_up_ul_lb){
             print_dbg("symUpUlLb=%d, {pktFId=%u, otaFId=%u}, {pktSfId=%u, otaSfId=%u}, \t {pktSlId=%u, otaSlId=%u}, {pktSym=%u, otaSym=%u}, {pktTti=%u, otaTti=%u},otaSymId = %d, xran_lib_ota_sym_idx_mu[mu] = %d\n",
                    p_dev_ctx->perMu[mu].sym_up_ul_lb, pktFrameId, otaFrameId, pktSfId, otaSfId,
                    pktSlotId, otaSlotId, symId, xran_lib_ota_sym_idx_mu[mu] % XRAN_NUM_OF_SYMBOL_PER_SLOT,
                    tti, otaTti,otaSymId, xran_lib_ota_sym_idx_mu[mu]);
-            print_dbg("otaSymIdx=%d, symIdxDeadlineMin=%d, ttiPkt=%u, symPkt=%u, otaTti=%u",
-                otaSymIdx, symIdxDeadlineMin, tti, symId, otaTti);
+            print_dbg("otaSymIdx=%d, elapsedSym=%d, ttiPkt=%u, symPkt=%u, otaTti=%u",
+                otaSymIdx, elapsedSym, tti, symId, otaTti);
             ++p_dev_ctx->fh_counters.Rx_early;
             return -1;
         }
@@ -511,8 +518,9 @@ int process_mbuf_batch(struct rte_mbuf* pkt_q[], void* handle, int16_t num, stru
 #if XRAN_MLOG_VAR
             if(radio_hdr[i] != NULL && data_hdr[i] != NULL)
             {
+                mlogVarCnt = 0;
                 mlogVar[mlogVarCnt++] = 0xBBBBBBBB;
-                mlogVar[mlogVarCnt++] = xran_lib_ota_tti_mu[PortId][mu];
+                mlogVar[mlogVarCnt++] = xran_lib_ota_tti_mu[xran_port][mu[i]];
                 mlogVar[mlogVarCnt++] = radio_hdr[i]->frame_id;
                 mlogVar[mlogVarCnt++] = radio_hdr[i]->sf_slot_sym.subframe_id;
                 mlogVar[mlogVarCnt++] = radio_hdr[i]->sf_slot_sym.slot_id;
@@ -557,7 +565,7 @@ int process_mbuf_batch(struct rte_mbuf* pkt_q[], void* handle, int16_t num, stru
             if (radio_hdr[i] != NULL && data_hdr[i] != NULL)
             {
                 mlogVar[mlogVarCnt++] = 0xBBBBBBBB;
-                mlogVar[mlogVarCnt++] = xran_lib_ota_tti_mu[PortId][mu];
+                mlogVar[mlogVarCnt++] = xran_lib_ota_tti_mu[xran_port][mu[i]];
                 mlogVar[mlogVarCnt++] = radio_hdr[i]->frame_id;
                 mlogVar[mlogVarCnt++] = radio_hdr[i]->sf_slot_sym.subframe_id;
                 mlogVar[mlogVarCnt++] = radio_hdr[i]->sf_slot_sym.slot_id;

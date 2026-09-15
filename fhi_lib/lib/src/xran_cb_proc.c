@@ -203,7 +203,7 @@ int32_t xran_timing_create_cbs(void *args)
     uint32_t delay_cp_ul;
     uint32_t delay_up;
     uint32_t time_diff_us;
-    uint32_t delay_cp2up;
+    int32_t  delay_cp2up;
     uint32_t sym_cp_dl_max, sym_cp_dl_min;
     uint32_t sym_cp_ul;
     uint32_t time_diff_nSymb;
@@ -213,7 +213,8 @@ int32_t xran_timing_create_cbs(void *args)
     struct xran_device_ctx *p_dev_ctx =  (struct xran_device_ctx *)args;
     struct cb_elem_entry * cb_elm = NULL;
     uint32_t interval_us_local, ul_delay_offset;
-    uint8_t ru_id, mu, numSlots, max_dl_offset_sym, min_dl_offset_sym, ul_offset_sym;
+    uint32_t numSlots, max_dl_offset_sym, min_dl_offset_sym, ul_offset_sym;
+    uint8_t ru_id, mu;
     /* ToS = Top of Second start +- 1.5us */
     struct timespec ts;
     char buff[100];
@@ -299,12 +300,20 @@ int32_t xran_timing_create_cbs(void *args)
             delay_up    = p_dev_ctx->fh_cfg.perMu[mu].T1a_max_up;
             time_diff_us = p_dev_ctx->fh_cfg.perMu[mu].Ta4_max;
             lower_bound_window=(p_dev_ctx->fh_cfg.perMu[mu].Ta3_min>p_dev_ctx->fh_cfg.perMu[mu].Ta4_min?p_dev_ctx->fh_cfg.perMu[mu].Ta3_min:p_dev_ctx->fh_cfg.perMu[mu].Ta4_min);
-            delay_cp2up = p_dev_ctx->fh_cfg.perMu[mu].T1a_max_cp_dl - p_dev_ctx->fh_cfg.perMu[mu].T1a_max_up;
+            delay_cp2up = (int32_t)p_dev_ctx->fh_cfg.perMu[mu].T1a_max_cp_dl - (int32_t)p_dev_ctx->fh_cfg.perMu[mu].T1a_max_up;
 
             time_diff_nSymb = time_diff_us*1000/(interval_us_local*1000/N_SYM_PER_SLOT);
             p_dev_ctx->perMu[mu].sym_up       = sym_up = -(delay_up*1000/(interval_us_local*1000/N_SYM_PER_SLOT));
             p_dev_ctx->perMu[mu].sym_up_ul_ub    = time_diff_nSymb = (time_diff_us*1000/(interval_us_local*1000/N_SYM_PER_SLOT)+1);
             p_dev_ctx->perMu[mu].sym_up_ul_lb = (lower_bound_window*1000/(interval_us_local*1000/N_SYM_PER_SLOT)+1);
+
+            /* Whole slots spanned by the U-plane windows (cf. dlCpSlotOffset /
+             * ulCpSlotOffset for the C-plane). The TX/RX paths keep consuming the
+             * un-wrapped symbol counts stored above; these mirror the C-plane
+             * offsets for validation and logging. Validate before narrowing into
+             * the uint8_t perMu fields so oversized configs cannot wrap past the cap. */
+            uint32_t dlUpSlotOffset = ((uint32_t)(-sym_up) + N_SYM_PER_SLOT - 1) / N_SYM_PER_SLOT;
+            uint32_t ulUpDeadlineSlotOffset = time_diff_nSymb / N_SYM_PER_SLOT;
 
 #ifdef POLL_EBBU_OFFLOAD
             delay_up_min    = p_dev_ctx->fh_cfg.perMu[mu].T1a_min_up;
@@ -319,8 +328,44 @@ int32_t xran_timing_create_cbs(void *args)
             printf("RU%d mu%u, Start C-plane UL %d us after TTI  [trigger on sym %d]\n", ru_id, mu, delay_cp_ul, sym_cp_ul);
             printf("RU%d mu%u, Start U-plane DL %d us before OTA [offset  in sym %d]\n", ru_id, mu, delay_up, sym_up);
             printf("RU%d mu%u, Start U-plane UL %d us OTA        [offset  in sym %d]\n", ru_id, mu, time_diff_us, time_diff_nSymb);
+            printf("RU%d mu%u, U-plane DL window spans %u slot(s) before OTA, UL deadline %u slot(s) after OTA\n",
+                    ru_id, mu, dlUpSlotOffset, ulUpDeadlineSlotOffset);
             printf("RU%d mu%u, C-plane to U-plane delay %d us after TTI\n", ru_id, mu, delay_cp2up);
             printf("Start Sym timer %ld ns\n", TX_TIMER_INTERVAL/N_SYM_PER_SLOT);
+
+            if(dlUpSlotOffset > XRAN_MAX_UP_WINDOW_SLOTS ||
+               ulUpDeadlineSlotOffset > XRAN_MAX_UP_WINDOW_SLOTS)
+            {
+                print_err("RU%d mu%u: T1a_max_up %u us / Ta4_max %u us span %u/%u slots, max supported is %u\n",
+                        ru_id, mu, delay_up, time_diff_us,
+                        dlUpSlotOffset, ulUpDeadlineSlotOffset,
+                        XRAN_MAX_UP_WINDOW_SLOTS);
+                goto err0;
+            }
+            p_dev_ctx->perMu[mu].dlUpSlotOffset = dlUpSlotOffset;
+            p_dev_ctx->perMu[mu].ulUpDeadlineSlotOffset = ulUpDeadlineSlotOffset;
+
+            if(p_dev_ctx->enableCP)
+            {
+                /* U-plane TX for slot N reads the section-DB entries written when its
+                 * DL C-plane was sent: the C-plane must go out first, and the entry
+                 * (tti % XRAN_MAX_SECTIONDB_CTX) is overwritten when the C-plane of
+                 * slot N+XRAN_MAX_SECTIONDB_CTX is built. */
+                if(p_dev_ctx->fh_cfg.perMu[mu].T1a_max_up > p_dev_ctx->fh_cfg.perMu[mu].T1a_max_cp_dl)
+                {
+                    print_err("RU%d mu%u: T1a_max_up %u us exceeds T1a_max_cp_dl %u us - DL C-plane must precede U-plane\n",
+                            ru_id, mu, p_dev_ctx->fh_cfg.perMu[mu].T1a_max_up, p_dev_ctx->fh_cfg.perMu[mu].T1a_max_cp_dl);
+                    goto err0;
+                }
+                if((uint32_t)(p_dev_ctx->fh_cfg.perMu[mu].T1a_max_cp_dl - p_dev_ctx->fh_cfg.perMu[mu].T1a_min_up) >=
+                        (uint32_t)XRAN_MAX_SECTIONDB_CTX * interval_us_local)
+                {
+                    print_err("RU%d mu%u: T1a_max_cp_dl %u us to T1a_min_up %u us spread exceeds the section-DB depth (%u slots)\n",
+                            ru_id, mu, p_dev_ctx->fh_cfg.perMu[mu].T1a_max_cp_dl, p_dev_ctx->fh_cfg.perMu[mu].T1a_min_up,
+                            XRAN_MAX_SECTIONDB_CTX);
+                    goto err0;
+                }
+            }
 
             if(0 == p_dev_ctx->dlCpProcBurst && p_dev_ctx->DynamicSectionEna == 0)
             {
@@ -328,6 +373,11 @@ int32_t xran_timing_create_cbs(void *args)
                     p_dev_ctx->numSymsForDlCP = max_dl_offset_sym - min_dl_offset_sym + 1;
                 else
                     p_dev_ctx->numSymsForDlCP = 1;
+
+                /* the burst is spread over the 14-entry symbol wheel; more than one
+                 * slot of spread would insert duplicate callbacks on the same symbol */
+                if(p_dev_ctx->numSymsForDlCP > N_SYM_PER_SLOT)
+                    p_dev_ctx->numSymsForDlCP = N_SYM_PER_SLOT;
             }
             else
                 p_dev_ctx->numSymsForDlCP = N_SYM_PER_SLOT;
@@ -381,11 +431,13 @@ int32_t xran_timing_create_cbs(void *args)
                 }
             }
 
-            /* Full slot UL OTA + time_diff_us */
-            if(time_diff_nSymb > N_SYM_PER_SLOT)
-            {
-                p_dev_ctx->perMu[mu].deadline_slot_advance[XRAN_SLOT_FULL_CB] = (time_diff_nSymb) / N_SYM_PER_SLOT;
-            }
+            /* Full slot UL OTA + time_diff_us.
+             * The callback is registered on the wheel symbol (offset % 14); the whole
+             * slots the offset spans (offset / 14) must be carried in
+             * deadline_slot_advance so the callback reports the right tti. The
+             * division must be unconditional: an offset of exactly one slot wraps the
+             * wheel symbol to 0 of the next slot and still needs advance = 1. */
+            p_dev_ctx->perMu[mu].deadline_slot_advance[XRAN_SLOT_FULL_CB] = (time_diff_nSymb) / N_SYM_PER_SLOT;
             print_dbg("Full slot UL %d [%d]\n", p_dev_ctx->perMu[mu].deadline_slot_advance[XRAN_SLOT_FULL_CB], time_diff_nSymb);
             cb_elm = xran_create_cb(xran_timer_arm_for_deadline, rx_ul_deadline_full_cb, (void*)p_dev_ctx);
             if(cb_elm)
@@ -400,10 +452,7 @@ int32_t xran_timing_create_cbs(void *args)
             }
 
             /* 1/4 UL OTA + time_diff_us*/
-            if(time_diff_nSymb + 1*(N_SYM_PER_SLOT/4) > N_SYM_PER_SLOT)
-            {
-                p_dev_ctx->perMu[mu].deadline_slot_advance[XRAN_SLOT_1_4_CB] = (time_diff_nSymb + 1*(N_SYM_PER_SLOT/4)) / N_SYM_PER_SLOT;
-            }
+            p_dev_ctx->perMu[mu].deadline_slot_advance[XRAN_SLOT_1_4_CB] = (time_diff_nSymb + 1*(N_SYM_PER_SLOT/4)) / N_SYM_PER_SLOT;
             print_dbg("1/4 UL OTA  %d [%d]\n", p_dev_ctx->perMu[mu].deadline_slot_advance[XRAN_SLOT_1_4_CB], time_diff_nSymb);
             cb_elm = xran_create_cb(xran_timer_arm_for_deadline, rx_ul_deadline_one_fourths_cb, (void*)p_dev_ctx);
             if(cb_elm)
@@ -418,10 +467,7 @@ int32_t xran_timing_create_cbs(void *args)
             }
 
             /* Half slot UL OTA + time_diff_us*/
-            if(time_diff_nSymb + N_SYM_PER_SLOT/2 > N_SYM_PER_SLOT)
-            {
-                p_dev_ctx->perMu[mu].deadline_slot_advance[XRAN_SLOT_HALF_CB] = (time_diff_nSymb + N_SYM_PER_SLOT/2) / N_SYM_PER_SLOT;
-            }
+            p_dev_ctx->perMu[mu].deadline_slot_advance[XRAN_SLOT_HALF_CB] = (time_diff_nSymb + N_SYM_PER_SLOT/2) / N_SYM_PER_SLOT;
             print_dbg("Half slot UL   %d [%d]\n", p_dev_ctx->perMu[mu].deadline_slot_advance[XRAN_SLOT_HALF_CB], time_diff_nSymb);
             cb_elm = xran_create_cb(xran_timer_arm_for_deadline, rx_ul_deadline_half_cb, (void*)p_dev_ctx);
             if(cb_elm)
@@ -436,10 +482,7 @@ int32_t xran_timing_create_cbs(void *args)
             }
 
             /* 3/4 UL OTA + time_diff_us*/
-            if(time_diff_nSymb + 4*(N_SYM_PER_SLOT/4))
-            {
-                p_dev_ctx->perMu[mu].deadline_slot_advance[XRAN_SLOT_3_4_CB] = (time_diff_nSymb + 4*(N_SYM_PER_SLOT/4)) / N_SYM_PER_SLOT;
-            }
+            p_dev_ctx->perMu[mu].deadline_slot_advance[XRAN_SLOT_3_4_CB] = (time_diff_nSymb + 4*(N_SYM_PER_SLOT/4)) / N_SYM_PER_SLOT;
             print_dbg("3/4 UL   %d [%d]\n", p_dev_ctx->perMu[mu].deadline_slot_advance[XRAN_SLOT_3_4_CB], time_diff_nSymb);
             cb_elm = xran_create_cb(xran_timer_arm_for_deadline, rx_ul_deadline_three_fourths_cb, (void*)p_dev_ctx);
             if(cb_elm)
@@ -457,6 +500,7 @@ int32_t xran_timing_create_cbs(void *args)
             if (0 == p_dev_ctx->enableSrsCp)
             {
                 uint16_t nSrsDealySym = p_dev_ctx->nSrsDelaySym;
+                p_dev_ctx->perMu[mu].deadline_slot_advance[XRAN_SLOT_STATIC_SRS_CB] = (time_diff_nSymb + nSrsDealySym) / N_SYM_PER_SLOT;
                 printf("Start U-plane static SRS %d us OTA        [offset  in sym %d]\n", time_diff_us, time_diff_nSymb + nSrsDealySym);
                 cb_elm = xran_create_cb(xran_timer_arm_for_deadline, rx_ul_static_srs_cb, (void*)p_dev_ctx);
                 if(cb_elm)
@@ -698,7 +742,9 @@ xran_reg_sym_cb_tx_win_end(struct xran_device_ctx * p_dev_ctx, xran_callback_sym
         printf("time duration %d rounded up to duration of %d symbols\n", time_diff_us, time_diff_nSymb);
     }
     printf("U-plane DL advance is %d [us] measured against OTA time [offset in symbols is %d]\n", time_diff_us, -time_diff_nSymb);
-    absolute_ota_sym =  ((symb + XRAN_NUM_OF_SYMBOL_PER_SLOT) - time_diff_nSymb) % XRAN_NUM_OF_SYMBOL_PER_SLOT;
+    /* round the advance up to whole slots before subtracting so offsets spanning
+     * more than one slot cannot underflow the unsigned arithmetic */
+    absolute_ota_sym =  ((symb + ((time_diff_nSymb / XRAN_NUM_OF_SYMBOL_PER_SLOT) + 1) * XRAN_NUM_OF_SYMBOL_PER_SLOT) - time_diff_nSymb) % XRAN_NUM_OF_SYMBOL_PER_SLOT;
     printf("requested symb %d pkt tx time [deadline] corresponds to symb %d OTA time\n", symb, absolute_ota_sym);
 
     p_loc_sym_cb_ctx->symb_num_req  = symb;
@@ -744,8 +790,10 @@ xran_reg_sym_cb_tx_win_begin(struct xran_device_ctx * p_dev_ctx, xran_callback_s
         printf("time duration %d rounded up to duration of %d symbols\n", time_diff_us, time_diff_nSymb);
     }
     printf("U-plane DL advance is %d [us] measured against OTA time [offset in symbols is %d]\n", time_diff_us, -time_diff_nSymb);
+    /* round the advance up to whole slots before subtracting so offsets spanning
+     * more than one slot cannot underflow the unsigned arithmetic */
+    absolute_ota_sym =  ((symb + ((time_diff_nSymb / XRAN_NUM_OF_SYMBOL_PER_SLOT) + 1) * XRAN_NUM_OF_SYMBOL_PER_SLOT) - time_diff_nSymb) % XRAN_NUM_OF_SYMBOL_PER_SLOT;
     printf("requested symb %d pkt tx time [deadline] corresponds to symb %d OTA time\n", symb, absolute_ota_sym);
-    absolute_ota_sym =  ((symb + XRAN_NUM_OF_SYMBOL_PER_SLOT) - time_diff_nSymb) % XRAN_NUM_OF_SYMBOL_PER_SLOT;
 
     p_loc_sym_cb_ctx->symb_num_req  = symb;
     p_loc_sym_cb_ctx->sym_diff      = time_diff_nSymb;
